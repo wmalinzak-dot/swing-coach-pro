@@ -7,8 +7,10 @@ web-build/
 /ios
 /android
 
-# Model weights (6.4 MB binary) — fetch with `npm run get-model`
-assets/*.tflite
+# NOTE: assets/*.tflite is deliberately NOT ignored. EAS Build uploads only
+# git-tracked files, and src/pose.js + src/useSwingCapture.js require() the
+# model at bundle time — ignoring it makes every cloud build fail. It is a
+# fixed 6.4 MB binary that never changes, so committing it costs nothing.
 
 # Secrets & local config
 .env
