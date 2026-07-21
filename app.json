@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Swing Coach Pro",
+    "slug": "swing-coach-pro",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#082516",
+    "plugins": [
+      ["react-native-fast-tflite", { "enableCoreMLDelegate": true }],
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "Swing Coach uses the camera to film and analyze your swing.",
+          "enableMicrophonePermission": false
+        }
+      ]
+    ],
+    "ios": {
+      "bundleIdentifier": "com.you.swingcoachpro",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Swing Coach needs your photo library to analyze your swing videos.",
+        "NSCameraUsageDescription": "Swing Coach uses the camera to film and analyze your swing."
+      }
+    },
+    "android": {
+      "package": "com.you.swingcoachpro",
+      "permissions": ["CAMERA", "READ_MEDIA_VIDEO", "READ_EXTERNAL_STORAGE"]
+    }
+  }
+}
