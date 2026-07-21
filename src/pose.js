@@ -18,47 +18,10 @@ import jpeg from 'jpeg-js';
 
 const INPUT = 256;
 
-// BlazePose landmark index → name (MoveNet-compatible names + feet/hands extras)
-export const LANDMARK_NAMES = {
-  0: 'nose',
-  11: 'left_shoulder',
-  12: 'right_shoulder',
-  13: 'left_elbow',
-  14: 'right_elbow',
-  15: 'left_wrist',
-  16: 'right_wrist',
-  23: 'left_hip',
-  24: 'right_hip',
-  25: 'left_knee',
-  26: 'right_knee',
-  27: 'left_ankle',
-  28: 'right_ankle',
-  29: 'left_heel',
-  30: 'right_heel',
-  31: 'left_foot_index',
-  32: 'right_foot_index',
-};
-
-export const EDGES = [
-  ['left_shoulder', 'right_shoulder'],
-  ['left_shoulder', 'left_elbow'],
-  ['left_elbow', 'left_wrist'],
-  ['right_shoulder', 'right_elbow'],
-  ['right_elbow', 'right_wrist'],
-  ['left_shoulder', 'left_hip'],
-  ['right_shoulder', 'right_hip'],
-  ['left_hip', 'right_hip'],
-  ['left_hip', 'left_knee'],
-  ['left_knee', 'left_ankle'],
-  ['right_hip', 'right_knee'],
-  ['right_knee', 'right_ankle'],
-  ['left_ankle', 'left_heel'],
-  ['left_heel', 'left_foot_index'],
-  ['right_ankle', 'right_heel'],
-  ['right_heel', 'right_foot_index'],
-];
-
-export const MIN_SCORE = 0.5;
+// Constants live in constants.js so the web build and the worklet code can
+// import them without pulling in the native modules above.
+export { LANDMARK_NAMES, EDGES, MIN_SCORE } from './constants';
+import { LANDMARK_NAMES, MIN_SCORE } from './constants';
 
 let model = null;
 let lastRoi = null; // tracked between frames of the same video

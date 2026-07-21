@@ -16,6 +16,7 @@ import {
   StyleSheet,
   useWindowDimensions,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
@@ -26,6 +27,7 @@ import { extractFrames, densifyDownswing, extractFramesAt } from './src/videoFra
 import { labelPhases, analyzeFrames, findTopMs } from './src/analysis';
 import FrameOverlay from './src/FrameOverlay';
 import SwingCamera from './src/SwingCamera';
+import { buildDemoSwing } from './src/demoSwing';
 
 const DEEP = '#082516';
 const TURF = '#0E3B24';
@@ -164,6 +166,14 @@ export default function App() {
     }
   }
 
+  // Drives the real labelPhases → analyzeFrames path with hand-built poses.
+  function runDemo() {
+    setShowAll(false);
+    setStatus('');
+    const labeled = labelPhases(buildDemoSwing(), ideal.profile.handedness);
+    setResults(analyzeFrames(labeled, ideal));
+  }
+
   const totalFaults = results ? results.reduce((n, f) => n + f.faults.length, 0) : 0;
   const visibleFrames = results
     ? showAll
@@ -228,30 +238,47 @@ export default function App() {
               </Pressable>
             </View>
 
-            <Pressable
-              style={[styles.cta, busy && { opacity: 0.5 }]}
-              disabled={busy}
-              onPress={() => {
-                setStatus('');
-                setStep('camera');
-              }}
-            >
-              <Text style={styles.ctaText}>Record a swing (live)</Text>
-            </Pressable>
+            {/* Camera and video capture are native-only; the browser preview
+                runs the analysis engine against a known synthetic swing. */}
+            {Platform.OS !== 'web' && (
+              <>
+                <Pressable
+                  style={[styles.cta, busy && { opacity: 0.5 }]}
+                  disabled={busy}
+                  onPress={() => {
+                    setStatus('');
+                    setStep('camera');
+                  }}
+                >
+                  <Text style={styles.ctaText}>Record a swing (live)</Text>
+                </Pressable>
+
+                <Pressable
+                  style={[styles.ctaGhost, busy && { opacity: 0.5 }]}
+                  disabled={busy}
+                  onPress={pickAndAnalyze}
+                >
+                  <Text style={styles.ctaGhostText}>
+                    {results ? 'Analyze another video' : 'Pick a saved video'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
 
             <Pressable
-              style={[styles.ctaGhost, busy && { opacity: 0.5 }]}
+              style={[Platform.OS === 'web' ? styles.cta : styles.ctaGhost, busy && { opacity: 0.5 }]}
               disabled={busy}
-              onPress={pickAndAnalyze}
+              onPress={runDemo}
             >
-              <Text style={styles.ctaGhostText}>
-                {results ? 'Analyze another video' : 'Pick a saved video'}
+              <Text style={Platform.OS === 'web' ? styles.ctaText : styles.ctaGhostText}>
+                Run demo swing
               </Text>
             </Pressable>
 
             <Text style={styles.hint}>
-              Live capture tracks you at full frame rate. Saved slow-mo clips (120/240fps) still
-              give the sharpest impact frame.
+              {Platform.OS === 'web'
+                ? 'Browser preview: pose detection needs the native build, so the demo drives the real analysis engine with known poses.'
+                : 'Live capture tracks you at full frame rate. Saved slow-mo clips (120/240fps) still give the sharpest impact frame.'}
             </Text>
 
             {busy && (

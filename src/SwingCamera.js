@@ -10,7 +10,7 @@ import { Camera, useCameraDevice, useCameraPermission } from 'react-native-visio
 import Svg, { Line, Circle } from 'react-native-svg';
 
 import { useSwingCapture } from './useSwingCapture';
-import { EDGES, MIN_SCORE } from './pose';
+import { EDGES, MIN_SCORE } from './constants';
 
 const DEEP = '#082516';
 const CHALK = '#F2EFE6';

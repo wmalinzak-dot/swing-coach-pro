@@ -4,7 +4,7 @@
 import React from 'react';
 import { View, Image, Text, StyleSheet } from 'react-native';
 import Svg, { Line, Circle } from 'react-native-svg';
-import { EDGES, MIN_SCORE } from './pose';
+import { EDGES, MIN_SCORE } from './constants';
 import { resolvePoint } from './analysis';
 
 const TURF = '#0E3B24';

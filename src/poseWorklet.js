@@ -8,7 +8,7 @@
 // This replaces the disk → base64 → jpeg-js path in pose.js entirely. The
 // resize plugin hands us pixels natively; we never touch a JPEG.
 
-import { LANDMARK_NAMES, MIN_SCORE } from './pose';
+import { LANDMARK_NAMES, MIN_SCORE } from './constants';
 
 export const INPUT = 256;
 

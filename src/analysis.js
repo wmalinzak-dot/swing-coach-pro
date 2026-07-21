@@ -2,7 +2,7 @@
 // v2: dense-frame phase detection (velocity-based impact) and new faults
 // unlocked by BlazePose's 33 landmarks (heels + toes → balance, knee sway).
 
-import { MIN_SCORE } from './pose';
+import { MIN_SCORE } from './constants';
 
 const P = (kp, name) => (kp[name] && kp[name].score >= MIN_SCORE ? kp[name] : null);
 

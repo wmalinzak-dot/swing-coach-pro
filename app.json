@@ -7,7 +7,12 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#082516",
     "plugins": [
-      ["react-native-fast-tflite", { "enableCoreMLDelegate": true }],
+      [
+        "react-native-fast-tflite",
+        {
+          "enableCoreMLDelegate": true
+        }
+      ],
       [
         "react-native-vision-camera",
         {
@@ -26,7 +31,14 @@
     },
     "android": {
       "package": "com.you.swingcoachpro",
-      "permissions": ["CAMERA", "READ_MEDIA_VIDEO", "READ_EXTERNAL_STORAGE"]
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
     }
   }
 }

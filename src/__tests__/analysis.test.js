@@ -1,14 +1,11 @@
 // Tests the swing analysis engine against synthetic skeletons.
 //
 // idealModel.js and analysis.js are pure functions over plain objects, so they
-// run in Node with no device. pose.js is mocked because it pulls in native
-// modules (TFLite, expo-image-manipulator) that cannot load here — analysis.js
-// only needs MIN_SCORE from it.
+// run in Node with no device. They take MIN_SCORE from constants.js rather than
+// pose.js, so no native module is pulled in and nothing needs mocking.
 //
 // This covers geometry, phase labeling, and fault thresholds. It deliberately
 // covers NONE of the pose detection, camera, or worklet layers.
-
-jest.mock('../pose', () => ({ MIN_SCORE: 0.5 }));
 
 import { buildIdealModel } from '../idealModel';
 import { labelPhases, analyzeFrames } from '../analysis';
