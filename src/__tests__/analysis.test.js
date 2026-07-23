@@ -140,6 +140,58 @@ describe('labelPhases — locates the swing positions', () => {
       'downswing', 'impact', 'follow-through', 'follow-through',
     ]);
   });
+
+  it('keeps the top at the real top even when the finish holds the hands higher', () => {
+    // Finish frame (idx 7) has the wrist HIGHER on screen (y=150) than the
+    // top of the backswing (y=210). The downswing-velocity anchor must stop
+    // the top from jumping to the finish.
+    const track = [500, 420, 330, 210, 340, 500, 380, 150];
+    const withHighFinish = labelPhases(
+      track.map((y, i) => frame(i * 100, body({ leadWristY: y }))),
+      RIGHT_HANDED
+    );
+    expect(withHighFinish[3].phase).toBe('top');
+    expect(withHighFinish.findIndex((f) => f.phase === 'impact')).toBe(5);
+  });
+
+  it('marks frames well after impact as "end", outside the scored swing', () => {
+    const frames = [
+      ...buildSwing(),
+      frame(2600, body({ leadWristY: 460 })),
+      frame(2800, body({ leadWristY: 470 })),
+    ];
+    const phases = labelPhases(frames, RIGHT_HANDED).map((f) => f.phase);
+    expect(phases[8]).toBe('end');
+    expect(phases[9]).toBe('end');
+  });
+});
+
+describe('post-swing movement cannot affect the score', () => {
+  it('ignores head slide, balance and foot position after the finish window', () => {
+    // Two frames 2s after impact where the player relaxes: head way off the
+    // ball, trail foot flat. Within the swing these would be faults — after
+    // the window they must register nothing.
+    const frames = [
+      ...buildSwing(),
+      frame(2600, body({ leadWristY: 460, noseX: 540, trailHeelY: 760 })),
+      frame(2800, body({ leadWristY: 470, noseX: 560, trailHeelY: 760 })),
+    ];
+    const analyzed = analyzeFrames(labelPhases(frames, RIGHT_HANDED), IDEAL);
+    const late = analyzed.filter((f) => f.timeMs >= 2600);
+    expect(late).toHaveLength(2);
+    expect(late.every((f) => f.phase === 'end')).toBe(true);
+    expect(late.flatMap((f) => f.faults)).toHaveLength(0);
+  });
+
+  it('still scores the finish inside the window', () => {
+    // The flat-trail-foot check must keep working where it belongs — in the
+    // real follow-through right after impact.
+    const analyzed = analyze({}, { trailHeelY: 760 });
+    const ftFaults = analyzed
+      .filter((f) => f.phase === 'follow-through')
+      .flatMap((f) => f.faults.map((x) => x.id));
+    expect(ftFaults).toContain('flat-trail-foot');
+  });
 });
 
 describe('analyzeFrames — fires on real faults, stays quiet otherwise', () => {

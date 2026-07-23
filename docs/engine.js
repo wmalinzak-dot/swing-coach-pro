@@ -136,6 +136,11 @@ function shoulderWidth(kp) {
   if (!l || !r) return null;
   return Math.hypot(l.x - r.x, l.y - r.y);
 }
+// How long after impact the swing still counts. Golfers relax, look up, and
+// walk off once the finish is held — nothing past this window may add faults
+// or move the score.
+const FOLLOW_WINDOW_MS = 1200;
+
 export function labelPhases(frames, handedness) {
   const lead = handedness === 'right' ? 'left' : 'right';
   const wristName = `${lead}_wrist`;
@@ -143,10 +148,22 @@ export function labelPhases(frames, handedness) {
     const w = P(f.keypoints, wristName);
     return w ? w.y : null;
   });
+  // Anchor on the fastest downward wrist move — unambiguously the downswing.
+  // A full finish often holds the hands HIGHER than the top, so "highest
+  // wrist anywhere" would label the finish as the top and mis-score the
+  // whole swing.
+  let anchorIdx = frames.length - 1;
+  let maxVel = -Infinity;
+  for (let i = 1; i < frames.length; i++) {
+    if (ys[i] == null || ys[i - 1] == null) continue;
+    const dt = frames[i].timeMs - frames[i - 1].timeMs || 1;
+    const vel = (ys[i] - ys[i - 1]) / dt; // + = wrist moving down
+    if (vel > maxVel) { maxVel = vel; anchorIdx = i; }
+  }
   let topIdx = 0;
   let minY = Infinity;
   ys.forEach((y, i) => {
-    if (y != null && y < minY) { minY = y; topIdx = i; }
+    if (y != null && i < anchorIdx && y < minY) { minY = y; topIdx = i; }
   });
   const addressY = ys.find((y) => y != null) ?? 0;
   let impactIdx = Math.min(topIdx + 1, frames.length - 1);
@@ -158,6 +175,7 @@ export function labelPhases(frames, handedness) {
     const score = Math.abs(ys[i] - addressY) - vel * 40;
     if (score < best) { best = score; impactIdx = i; }
   }
+  const impactMs = frames[impactIdx]?.timeMs ?? 0;
   return frames.map((f, i) => {
     let phase;
     if (i === 0) phase = 'setup';
@@ -165,7 +183,8 @@ export function labelPhases(frames, handedness) {
     else if (i === topIdx) phase = 'top';
     else if (i < impactIdx) phase = 'downswing';
     else if (i === impactIdx) phase = 'impact';
-    else phase = 'follow-through';
+    else if (f.timeMs - impactMs <= FOLLOW_WINDOW_MS) phase = 'follow-through';
+    else phase = 'end'; // swing over — analyzeFrames scores nothing here
     return { ...f, phase };
   });
 }
