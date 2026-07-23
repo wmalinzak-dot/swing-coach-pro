@@ -90,6 +90,17 @@ video.addEventListener('loadedmetadata', () => {
   $('analyze').textContent = 'Analyze my swing';
   sizeCanvas();
 });
+// Some browsers (notably Chrome) can't decode iPhone HEVC/.mov. Say so plainly
+// instead of leaving Analyze dead with no explanation.
+video.addEventListener('error', () => {
+  $('analyze').disabled = true;
+  $('analyze').textContent = 'Choose a video first';
+  setStatus(
+    "This video wouldn't play in your browser — iPhone .mov (HEVC) often won't decode in Chrome. " +
+    'Try Safari, or on the iPhone use Share → Options → Most Compatible, or export to MP4 (H.264).',
+    true
+  );
+});
 video.addEventListener('timeupdate', drawCurrentFrame);
 video.addEventListener('seeked', drawCurrentFrame);
 window.addEventListener('resize', () => { sizeCanvas(); drawCurrentFrame(); });
@@ -119,7 +130,7 @@ $('analyze').addEventListener('click', async () => {
     drawCurrentFrame();
     $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
-    setStatus(err.message || String(err));
+    setStatus(err.message || String(err), true);
   } finally {
     btn.disabled = false;
   }
@@ -132,10 +143,11 @@ $('demo').addEventListener('click', () => {
   $('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
-function setStatus(msg) {
+function setStatus(msg, isError = false) {
   const el = $('status');
   el.textContent = msg;
   el.hidden = !msg;
+  el.classList.toggle('error', isError);
 }
 
 // ---------- overlay ----------

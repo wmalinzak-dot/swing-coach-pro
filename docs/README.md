@@ -39,7 +39,9 @@ Push the repo to GitHub, then **Settings → Pages → Deploy from a branch →
 ## Known limits
 - Needs a normal web host — a claude.ai Artifact's sandbox blocks the MediaPipe
   runtime, so this cannot be published as an Artifact.
-- Best with MP4/H.264, face-on, whole body in frame, good light. HEVC `.mov`
-  files may not decode in Chrome.
+- Best with MP4/H.264, face-on, whole body in frame, good light. iPhone HEVC
+  `.mov` files decode in Safari and usually in Chrome-on-macOS, but not in every
+  Chromium build; the app now shows a clear message and suggests Safari or
+  exporting "Most Compatible"/MP4 when a video won't decode.
 - Browser landmark positions won't match the native TFLite build exactly, so
   fault thresholds may need a little tuning against real footage.
