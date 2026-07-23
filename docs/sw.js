@@ -1,10 +1,15 @@
-// Service worker: caches the app shell so the page opens offline.
+// Service worker: keeps the app shell available offline.
+//
+// Strategy: NETWORK-FIRST with cache fallback. The site auto-deploys on every
+// push, so cache-first would pin users to stale code until a manual cache
+// bump — with network-first, updates arrive on the next load and the cache
+// only serves when the network can't.
 //
 // Only same-origin files are cached — the MediaPipe runtime and model come
-// from CDNs and are fetched live, so offline mode covers the UI and the
-// sample analysis, not video pose detection.
+// from CDNs, so offline mode covers the UI and the sample analysis, not
+// video pose detection.
 
-const CACHE = 'scp-v1';
+const CACHE = 'scp-v2';
 const SHELL = [
   './',
   './index.html',
@@ -31,8 +36,15 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return; // CDN requests go to the network
+  if (url.origin !== location.origin) return; // CDN requests go straight to the network
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    fetch(e.request)
+      .then((res) => {
+        // Keep the cache fresh with whatever the network just served.
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });

@@ -20,6 +20,20 @@ const MODEL =
 
 let landmarker = null;
 
+// MediaPipe VIDEO mode requires timestamps that increase for the LIFETIME of
+// the landmarker — not per analysis. Resetting to 0 on a second "Analyze"
+// click poisons the graph with "Packet timestamp mismatch", and once errored
+// it stays broken. So: one forever-increasing clock, shared by all analyses.
+let mpClock = 0;
+
+async function rebuildPose(onStatus) {
+  // A poisoned graph cannot be revived — close it and build a fresh one.
+  try { landmarker?.close(); } catch { /* already dead */ }
+  landmarker = null;
+  mpClock = 0;
+  return initPose(onStatus);
+}
+
 export async function initPose(onStatus) {
   if (landmarker) return landmarker;
   onStatus && onStatus('Loading the pose engine (first run downloads ~10 MB)…');
@@ -63,13 +77,13 @@ function seek(video, t) {
 // Detect a pose track across the whole clip.
 // Returns [{ timeMs, width, height, keypoints }] in the shape engine.js wants.
 export async function detectSwing(video, { fps = 30, maxFrames = 90 } = {}, onProgress) {
-  const lm = await initPose(onProgress);
+  let lm = await initPose(onProgress);
   const dur = Math.max(0.2, video.duration || 0);
   const n = Math.min(maxFrames, Math.max(8, Math.round(dur * fps)));
   const W = video.videoWidth;
   const H = video.videoHeight;
   const frames = [];
-  let lastTs = -1;
+  let prevTMs = null;
 
   for (let i = 0; i < n; i++) {
     // Clamp off the very end — seeking exactly to duration often never fires.
@@ -77,12 +91,24 @@ export async function detectSwing(video, { fps = 30, maxFrames = 90 } = {}, onPr
     await seek(video, Math.max(0, t));
     onProgress && onProgress(i + 1, n);
 
-    // MediaPipe VIDEO mode demands strictly increasing millisecond timestamps.
-    let ts = Math.round(t * 1000);
-    if (ts <= lastTs) ts = lastTs + 1;
-    lastTs = ts;
+    // Advance the shared clock by the real gap between frames (min 1 ms) so
+    // it keeps MediaPipe's tracking honest but never moves backwards — even
+    // across separate analyses of separate videos.
+    const tMs = Math.round(t * 1000);
+    mpClock += prevTMs == null ? 1 : Math.max(1, tMs - prevTMs);
+    prevTMs = tMs;
 
-    const res = lm.detectForVideo(video, ts);
+    let res;
+    try {
+      res = lm.detectForVideo(video, mpClock);
+    } catch (e) {
+      // If the graph is poisoned (e.g. by a pre-fix error still in this
+      // session), rebuild it once and continue from a fresh clock.
+      lm = await rebuildPose(onProgress);
+      mpClock += 1;
+      prevTMs = tMs;
+      res = lm.detectForVideo(video, mpClock);
+    }
     const lms = res.landmarks && res.landmarks[0];
     if (!lms) continue;
 
