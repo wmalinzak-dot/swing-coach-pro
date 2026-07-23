@@ -4,6 +4,9 @@
 <meta charset="utf-8" />
 <title>Swing Coach Pro</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#082516" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="icon" href="./icon.svg" type="image/svg+xml" />
 <style>
   :root {
     --deep: #082516; --deep-2: #061b10; --turf: #0e3b24; --turf-line: #17492f;
@@ -48,7 +51,7 @@
     display: inline-block; background: var(--deep); color: var(--chalk); border: 1.5px dashed var(--turf-line);
     border-radius: 12px; padding: 22px 18px; width: 100%; cursor: pointer; transition: border-color 120ms;
   }
-  .file-btn:hover { border-color: var(--moss); }
+  .file-btn:hover, .file-btn:focus-within { border-color: var(--moss); }
   .file-btn strong { display: block; font-size: 16px; margin-bottom: 4px; }
   .file-btn span { color: var(--moss); font-size: 13px; }
   input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
@@ -61,6 +64,16 @@
   .chip.major { color: #ffd7d8; box-shadow: inset 0 0 0 1px var(--flag); }
   .chip.minor { color: #ffe6c2; box-shadow: inset 0 0 0 1px var(--amber); }
 
+  .pb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .pb button {
+    background: var(--deep); color: var(--chalk); border: 1px solid var(--turf-line); border-radius: 8px;
+    padding: 7px 12px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: var(--mono);
+  }
+  .pb button:hover { border-color: var(--moss); }
+  .pb button[aria-pressed="true"] { background: var(--chalk); color: var(--deep); }
+  .pb-rates, .pb-step, .pb-phases { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pb-phases button { text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+
   .cta { width: 100%; background: var(--flag); color: var(--chalk); border: none; border-radius: 11px;
     padding: 15px; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 14px; transition: filter 120ms, transform 60ms; }
   .cta:hover { filter: brightness(1.06); }
@@ -68,15 +81,29 @@
   .cta:disabled { opacity: 0.45; cursor: default; }
   .ghost { width: 100%; background: none; color: var(--moss); border: 1px solid var(--turf-line);
     border-radius: 11px; padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+  .ghost:hover { border-color: var(--moss); }
   .status { color: var(--good); text-align: center; margin-top: 14px; font-size: 14px; min-height: 1.2em; }
   .status:empty { display: none; }
   .status.error { color: var(--flag); }
   .hint { color: var(--moss); font-size: 13px; text-align: center; margin: 10px 4px 0; }
 
   .scorecard { margin: 26px 2px 16px; }
-  .score-big { font-size: 30px; font-weight: 900; }
-  .score-big.good { color: var(--good); }
+  .score-big { font-size: 44px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .grade-pill { display: inline-block; margin-left: 12px; padding: 3px 14px; border-radius: 999px;
+    background: var(--turf); border: 1px solid var(--turf-line); font-size: 17px; font-weight: 800; vertical-align: middle; }
+  .score-label { font-size: 15px; font-weight: 700; margin-top: 2px; }
   .score-sub { color: var(--moss); font-size: 13px; margin-top: 4px; }
+  .share { max-width: 320px; }
+
+  .metrics-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .metrics-table th { color: var(--moss); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--turf-line); }
+  .metrics-table td { padding: 8px; border-bottom: 1px solid var(--turf-line); }
+  .metrics-table tr:last-child td { border-bottom: none; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .ok { color: var(--good); font-weight: 700; }
+  .bad { color: var(--flag); font-weight: 700; }
+  .na { color: var(--moss); }
 
   .fault-card { background: var(--turf); border: 1px solid var(--turf-line); border-radius: 14px; padding: 15px; margin-bottom: 14px; border-left-width: 4px; }
   .fault-card.major { border-left-color: var(--flag); }
@@ -98,15 +125,37 @@
   .drill li { margin-bottom: 6px; font-size: 14px; }
   .drill li:last-child { margin-bottom: 0; }
 
+  .plan-item { background: var(--deep); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+  .plan-rank { color: var(--good); font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+  .plan-name { font-weight: 800; font-size: 16px; margin: 2px 0; }
+  .plan-why { color: var(--moss); font-size: 13px; margin-bottom: 6px; }
+  .plan-reps { font-size: 14px; }
+  .plan-foot { color: var(--moss); font-size: 13px; margin: 8px 2px 4px; }
+
+  .spark { width: 100%; max-width: 260px; height: auto; display: block; margin: 4px 0 10px; }
+  .hist-rows { margin-bottom: 4px; }
+  .hist-row { display: flex; justify-content: space-between; gap: 8px; padding: 7px 2px;
+    border-bottom: 1px solid var(--turf-line); font-size: 14px; }
+  .hist-row:last-child { border-bottom: none; }
+  .hist-score { font-family: var(--mono); font-weight: 700; }
+  .sample { color: var(--moss); font-style: normal; font-size: 12px; border: 1px solid var(--turf-line); border-radius: 999px; padding: 1px 8px; }
+
   .footnote { color: var(--moss); font-size: 12px; line-height: 1.6; text-align: center; margin-top: 26px;
     border-top: 1px solid var(--turf-line); padding-top: 18px; }
   @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+  @media print {
+    body { background: #fff; color: #111; }
+    .uploader, .stage, .pb, .cta, .ghost, .seg, #history, .footnote, .tagline, .share { display: none !important; }
+    .panel, .fault-card { border-color: #ccc; background: #fff; color: #111; }
+    .fault-tip, .plan-reps, .drill li { color: #111; }
+    .drill { background: #f5f5f5; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1 class="brand">SWING COACH&nbsp;PRO</h1>
-  <p class="tagline">Upload a swing. It finds where your body is off — at setup, the top, and impact — marks it on the video, and gives you a drill for each.</p>
+  <p class="tagline">Upload a swing. It finds where your body is off — at setup, the top, and impact — marks it on the video, scores the swing, and builds your practice plan.</p>
 
   <div class="panel">
     <div class="section">Your body</div>
@@ -137,6 +186,13 @@
         <button data-val="wedge" aria-pressed="false">wedge</button>
       </div>
     </div>
+    <div class="field"><label>Strictness — how hard to grade</label>
+      <div class="seg" data-key="sensitivity">
+        <button data-val="relaxed" aria-pressed="false">relaxed</button>
+        <button data-val="normal" aria-pressed="true">normal</button>
+        <button data-val="strict" aria-pressed="false">strict</button>
+      </div>
+    </div>
   </div>
 
   <div class="panel">
@@ -159,6 +215,19 @@
       <div class="active" id="active" hidden></div>
     </div>
 
+    <div class="pb" id="pb" hidden>
+      <div class="pb-rates" role="group" aria-label="Playback speed">
+        <button data-rate="0.25" aria-pressed="false">¼×</button>
+        <button data-rate="0.5" aria-pressed="false">½×</button>
+        <button data-rate="1" aria-pressed="true">1×</button>
+      </div>
+      <div class="pb-step" role="group" aria-label="Frame stepping">
+        <button id="step-back" aria-label="Step one frame back">⟨ frame</button>
+        <button id="step-fwd" aria-label="Step one frame forward">frame ⟩</button>
+      </div>
+      <div class="pb-phases" id="pb-phases"></div>
+    </div>
+
     <button class="cta" id="analyze" disabled>Choose a video first</button>
     <div class="status" id="status" hidden></div>
     <button class="ghost" id="demo">No video handy? See a sample analysis</button>
@@ -166,10 +235,13 @@
   </div>
 
   <div id="results"></div>
+  <div id="plan"></div>
+  <div id="history"></div>
 
   <p class="footnote">
     Pose detection by MediaPipe (BlazePose, 33 points) running in your browser. Faults are scored by the
-    same engine as the native app. Coaching drills are general guidance, not a substitute for a PGA instructor.
+    same engine as the native app. Progress history is stored only on this device. Coaching drills are
+    general guidance, not a substitute for a PGA instructor.
   </p>
 </div>
 

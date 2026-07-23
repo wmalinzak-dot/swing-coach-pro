@@ -278,3 +278,50 @@ export function resolvePoint(kp, name) {
   }
   return kp[name] || null;
 }
+
+// ---- Web-only addition: measured checkpoint values vs the personal model ----
+// Feeds the "you vs your model" table. Mirrors the same measurements the fault
+// checks use, but reports the numbers whether or not they cross a threshold.
+export function measureCheckpoints(labeledFrames, ideal) {
+  const { model, profile } = ideal;
+  const lead = profile.handedness === 'right' ? 'left' : 'right';
+  const setup = labeledFrames.find((f) => f.phase === 'setup');
+  const top = labeledFrames.find((f) => f.phase === 'top');
+  const impact = labeledFrames.find((f) => f.phase === 'impact');
+  const deg = (v) => (v == null ? null : Math.round(v));
+  const rows = [];
+
+  if (setup) {
+    const kp = setup.keypoints;
+    rows.push({ label: 'Spine tilt at address', measured: deg(spineTiltFromVertical(kp)), target: model.spineTiltAtAddress, kind: 'range', unit: '°' });
+    rows.push({ label: 'Knee flex at address', measured: deg(angleAt(P(kp, `${lead}_hip`), P(kp, `${lead}_knee`), P(kp, `${lead}_ankle`))), target: model.kneeFlexAtAddress, kind: 'range', unit: '°' });
+    const baseX = P(setup.keypoints, 'nose')?.x;
+    const sw = shoulderWidth(setup.keypoints);
+    if (baseX != null && sw) {
+      let peak = 0;
+      for (const f of labeledFrames) {
+        if (f.phase !== 'backswing' && f.phase !== 'top') continue;
+        const n = P(f.keypoints, 'nose');
+        if (n) peak = Math.max(peak, (Math.abs(n.x - baseX) / sw) * 100);
+      }
+      rows.push({ label: 'Peak head sway', measured: Math.round(peak), target: model.headSwayMaxPctShoulderWidth, kind: 'max', unit: '%' });
+    }
+  }
+  if (top) {
+    const kp = top.keypoints;
+    rows.push({ label: 'Lead arm at the top', measured: deg(angleAt(P(kp, `${lead}_shoulder`), P(kp, `${lead}_elbow`), P(kp, `${lead}_wrist`))), target: model.leadArmStraightTop[0], kind: 'min', unit: '°' });
+  }
+  if (impact) {
+    const kp = impact.keypoints;
+    rows.push({ label: 'Spine tilt at impact', measured: deg(spineTiltFromVertical(kp)), target: model.spineTiltAtImpact, kind: 'range', unit: '°' });
+    rows.push({ label: 'Hips open at impact', measured: deg(hipOpenDegrees(kp)), target: model.hipOpenAtImpact[0], kind: 'min', unit: '°' });
+    rows.push({ label: 'Lead-leg post at impact', measured: deg(angleAt(P(kp, `${lead}_hip`), P(kp, `${lead}_knee`), P(kp, `${lead}_ankle`))), target: model.leadLegImpact[0], kind: 'min', unit: '°' });
+  }
+  for (const r of rows) {
+    if (r.measured == null) { r.ok = null; continue; }
+    if (r.kind === 'range') r.ok = r.measured >= Math.round(r.target[0]) && r.measured <= Math.round(r.target[1]);
+    else if (r.kind === 'min') r.ok = r.measured >= Math.round(r.target);
+    else r.ok = r.measured <= Math.round(r.target);
+  }
+  return rows;
+}
