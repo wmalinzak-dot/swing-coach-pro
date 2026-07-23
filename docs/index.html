@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Swing Coach Pro</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --deep: #082516; --deep-2: #061b10; --turf: #0e3b24; --turf-line: #17492f;
+    --chalk: #f2efe6; --moss: #9dbfa9; --flag: #e4353b; --amber: #e8a33d; --good: #8fd6a5;
+    --font: system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--font); color: var(--chalk); line-height: 1.5;
+    background: radial-gradient(120% 80% at 50% -10%, #0c3120 0%, var(--deep) 55%, var(--deep-2) 100%);
+    background-attachment: fixed; min-height: 100vh; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 28px 18px 80px; }
+  .brand { font-weight: 900; letter-spacing: 0.18em; font-size: clamp(26px, 8vw, 36px); margin: 4px 0 0; text-wrap: balance; }
+  .tagline { color: var(--moss); margin: 6px 0 22px; font-size: 15px; max-width: 52ch; }
+  .panel { background: var(--turf); border: 1px solid var(--turf-line); border-radius: 16px; padding: 18px; margin-bottom: 16px; }
+  .section { font-weight: 800; letter-spacing: 0.14em; font-size: 12px; text-transform: uppercase; margin: 4px 0 14px; }
+  .section.sub { margin-top: 22px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field { margin-bottom: 13px; }
+  .field label { display: block; color: var(--moss); font-size: 13px; margin-bottom: 6px; }
+  input[type="number"] {
+    width: 100%; background: var(--deep); color: var(--chalk); border: 1px solid var(--turf-line);
+    border-radius: 9px; padding: 11px 12px; font-size: 16px; font-family: var(--mono); font-variant-numeric: tabular-nums;
+  }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--good); outline-offset: 1px; }
+  .seg { display: flex; gap: 8px; }
+  .seg button {
+    flex: 1; background: var(--deep); color: var(--moss); border: 1px solid var(--turf-line);
+    border-radius: 9px; padding: 11px 4px; font-size: 14px; font-weight: 600; text-transform: capitalize; cursor: pointer;
+    transition: background 120ms, color 120ms;
+  }
+  .seg button:hover { border-color: var(--moss); }
+  .seg button[aria-pressed="true"] { background: var(--chalk); color: var(--deep); border-color: var(--chalk); }
+  .model-line { line-height: 1.7; }
+  .model-line b { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .note { color: var(--moss); font-size: 13px; margin-top: 12px; }
+
+  .uploader { text-align: center; }
+  .file-btn {
+    display: inline-block; background: var(--deep); color: var(--chalk); border: 1.5px dashed var(--turf-line);
+    border-radius: 12px; padding: 22px 18px; width: 100%; cursor: pointer; transition: border-color 120ms;
+  }
+  .file-btn:hover { border-color: var(--moss); }
+  .file-btn strong { display: block; font-size: 16px; margin-bottom: 4px; }
+  .file-btn span { color: var(--moss); font-size: 13px; }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  .stage { position: relative; margin-top: 14px; border-radius: 14px; overflow: hidden; background: #000; line-height: 0; }
+  .stage video { width: 100%; height: auto; display: block; }
+  .stage canvas { position: absolute; inset: 0; pointer-events: none; }
+  .active { position: absolute; left: 10px; right: 10px; top: 10px; display: flex; flex-wrap: wrap; gap: 6px; line-height: 1.3; }
+  .chip { font-size: 12px; font-weight: 700; padding: 4px 9px; border-radius: 999px; background: rgba(6,27,16,0.82); }
+  .chip.major { color: #ffd7d8; box-shadow: inset 0 0 0 1px var(--flag); }
+  .chip.minor { color: #ffe6c2; box-shadow: inset 0 0 0 1px var(--amber); }
+
+  .cta { width: 100%; background: var(--flag); color: var(--chalk); border: none; border-radius: 11px;
+    padding: 15px; font-size: 16px; font-weight: 800; cursor: pointer; margin-top: 14px; transition: filter 120ms, transform 60ms; }
+  .cta:hover { filter: brightness(1.06); }
+  .cta:active { transform: translateY(1px); }
+  .cta:disabled { opacity: 0.45; cursor: default; }
+  .ghost { width: 100%; background: none; color: var(--moss); border: 1px solid var(--turf-line);
+    border-radius: 11px; padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+  .status { color: var(--good); text-align: center; margin-top: 14px; font-size: 14px; min-height: 1.2em; }
+  .status:empty { display: none; }
+  .hint { color: var(--moss); font-size: 13px; text-align: center; margin: 10px 4px 0; }
+
+  .scorecard { margin: 26px 2px 16px; }
+  .score-big { font-size: 30px; font-weight: 900; }
+  .score-big.good { color: var(--good); }
+  .score-sub { color: var(--moss); font-size: 13px; margin-top: 4px; }
+
+  .fault-card { background: var(--turf); border: 1px solid var(--turf-line); border-radius: 14px; padding: 15px; margin-bottom: 14px; border-left-width: 4px; }
+  .fault-card.major { border-left-color: var(--flag); }
+  .fault-card.minor { border-left-color: var(--amber); }
+  .fault-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .phase-tag { font-weight: 800; letter-spacing: 0.14em; font-size: 11px; text-transform: uppercase; color: var(--moss); }
+  .jump { background: var(--deep); color: var(--chalk); border: 1px solid var(--turf-line); border-radius: 8px;
+    padding: 5px 11px; font-size: 13px; font-weight: 700; font-family: var(--mono); cursor: pointer; }
+  .jump:hover { border-color: var(--moss); }
+  .time { color: var(--moss); font-family: var(--mono); font-size: 13px; }
+  .fault-label { font-weight: 800; font-size: 16px; margin-bottom: 8px; text-wrap: balance; }
+  .fault-label.major { color: var(--flag); }
+  .fault-label.minor { color: var(--amber); }
+  .fault-tip { font-size: 14.5px; margin-bottom: 12px; }
+  .fault-tip span { color: var(--moss); font-weight: 600; }
+  .drill { background: var(--deep); border-radius: 10px; padding: 12px 14px; }
+  .drill-name { font-weight: 800; font-size: 13px; letter-spacing: 0.04em; color: var(--good); margin-bottom: 8px; text-transform: uppercase; }
+  .drill ol { margin: 0; padding-left: 18px; }
+  .drill li { margin-bottom: 6px; font-size: 14px; }
+  .drill li:last-child { margin-bottom: 0; }
+
+  .footnote { color: var(--moss); font-size: 12px; line-height: 1.6; text-align: center; margin-top: 26px;
+    border-top: 1px solid var(--turf-line); padding-top: 18px; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="brand">SWING COACH&nbsp;PRO</h1>
+  <p class="tagline">Upload a swing. It finds where your body is off — at setup, the top, and impact — marks it on the video, and gives you a drill for each.</p>
+
+  <div class="panel">
+    <div class="section">Your body</div>
+    <div class="grid2">
+      <div class="field"><label for="heightCm">Height (cm)</label><input type="number" id="heightCm" value="178" inputmode="numeric" /></div>
+      <div class="field"><label for="weightKg">Weight (kg)</label><input type="number" id="weightKg" value="80" inputmode="numeric" /></div>
+      <div class="field"><label for="wingspanCm">Wingspan (cm)</label><input type="number" id="wingspanCm" value="178" inputmode="numeric" /></div>
+      <div class="field"><label for="age">Age</label><input type="number" id="age" value="35" inputmode="numeric" /></div>
+    </div>
+    <div class="section sub">Swing setup</div>
+    <div class="field"><label>Handedness</label>
+      <div class="seg" data-key="handedness">
+        <button data-val="right" aria-pressed="true">right</button>
+        <button data-val="left" aria-pressed="false">left</button>
+      </div>
+    </div>
+    <div class="field"><label>Flexibility</label>
+      <div class="seg" data-key="flexibility">
+        <button data-val="low" aria-pressed="false">low</button>
+        <button data-val="average" aria-pressed="true">average</button>
+        <button data-val="high" aria-pressed="false">high</button>
+      </div>
+    </div>
+    <div class="field"><label>Club in the video</label>
+      <div class="seg" data-key="club">
+        <button data-val="driver" aria-pressed="true">driver</button>
+        <button data-val="iron" aria-pressed="false">iron</button>
+        <button data-val="wedge" aria-pressed="false">wedge</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section">Your personal ideal model</div>
+    <div id="model"></div>
+    <div class="note" id="model-note"></div>
+  </div>
+
+  <div class="panel uploader">
+    <div class="section" style="text-align:left">Your swing</div>
+    <label class="file-btn">
+      <strong>Choose a swing video</strong>
+      <span>Face-on, whole body in frame. MP4 (H.264) works best. Nothing leaves your device.</span>
+      <input type="file" id="file" accept="video/*" />
+    </label>
+
+    <div class="stage" id="stage" hidden>
+      <video id="video" playsinline controls muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="active" id="active" hidden></div>
+    </div>
+
+    <button class="cta" id="analyze" disabled>Choose a video first</button>
+    <div class="status" id="status" hidden></div>
+    <button class="ghost" id="demo">No video handy? See a sample analysis</button>
+    <p class="hint">Detection runs entirely in your browser — your video is never uploaded anywhere.</p>
+  </div>
+
+  <div id="results"></div>
+
+  <p class="footnote">
+    Pose detection by MediaPipe (BlazePose, 33 points) running in your browser. Faults are scored by the
+    same engine as the native app. Coaching drills are general guidance, not a substitute for a PGA instructor.
+  </p>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
