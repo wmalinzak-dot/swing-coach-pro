@@ -544,22 +544,26 @@ function makeSummaryDataUrl() {
 }
 
 // ---------- suggestion box ----------
-// Suggestions become public GitHub issues on the project repo — the one
-// place both the owner and the assistant can read them later.
-const SUGGEST_URL = 'https://github.com/wmalinzak-dot/swing-coach-pro/issues/new';
+// Suggestions open the visitor's own mail app, pre-addressed to the owner —
+// no account and no backend, and submissions land straight in the inbox.
+const SUGGEST_TO = 'wmalinzak@gmail.com';
 
 function buildSuggestionUrl(text) {
   const t = String(text || '').trim();
-  const title = t.length > 60 ? t.slice(0, 57) + '…' : (t || 'Suggestion');
-  const body = (t || '(no text entered)') +
-    '\n\n—\nSent from the suggestion box on the Swing Coach Pro site.';
-  return `${SUGGEST_URL}?title=${encodeURIComponent('[Suggestion] ' + title)}&body=${encodeURIComponent(body)}`;
+  const body = (t || '') + '\n\n— Sent from the suggestion box on the Swing Coach Pro site.';
+  return `mailto:${SUGGEST_TO}?subject=${encodeURIComponent('Swing Coach Pro suggestion')}` +
+    `&body=${encodeURIComponent(body)}`;
 }
 
 function sendSuggestion() {
   const el = $('suggest-text');
-  window.open(buildSuggestionUrl(el.value), '_blank', 'noopener');
+  if (!el.value.trim()) { el.focus(); return; }
+  // location.href is the reliable way to trigger mailto on mobile Safari —
+  // window.open can leave a dead blank tab behind.
+  window.location.href = buildSuggestionUrl(el.value);
   el.value = '';
+  const note = $('suggest-note');
+  if (note) note.textContent = 'Opening your email app — just tap Send. Thanks! ⛳';
 }
 $('suggest-send').addEventListener('click', sendSuggestion);
 $('suggest-text').addEventListener('keydown', (e) => {
