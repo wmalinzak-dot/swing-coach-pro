@@ -154,6 +154,16 @@ describe('labelPhases — locates the swing positions', () => {
     expect(withHighFinish.findIndex((f) => f.phase === 'impact')).toBe(5);
   });
 
+  it('treats a lone frame as setup — the basis of the live stance check', () => {
+    // The web app's live camera mode analyzes one frame at a time; frame 0
+    // must land in 'setup' so the address-position faults apply.
+    const single = labelPhases([frame(0, body({ spineTiltDeg: 6 }))], RIGHT_HANDED);
+    expect(single).toHaveLength(1);
+    expect(single[0].phase).toBe('setup');
+    const analyzed = analyzeFrames(single, IDEAL);
+    expect(analyzed[0].faults.map((f) => f.id)).toContain('setup-too-upright');
+  });
+
   it('marks frames well after impact as "end", outside the scored swing', () => {
     const frames = [
       ...buildSwing(),

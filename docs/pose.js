@@ -74,6 +74,39 @@ function seek(video, t) {
   });
 }
 
+// Live stance mode: detect a single webcam frame. Shares the landmarker and
+// the forever-forward clock with detectSwing, advancing by real elapsed time
+// so MediaPipe's tracking smooths naturally between frames.
+let lastLiveWallMs = 0;
+export async function detectLiveFrame(video) {
+  const lm = await initPose();
+  const now = performance.now();
+  const delta = lastLiveWallMs ? Math.max(1, Math.round(now - lastLiveWallMs)) : 1;
+  lastLiveWallMs = now;
+  mpClock += delta;
+  let res;
+  try {
+    res = lm.detectForVideo(video, mpClock);
+  } catch (e) {
+    const fresh = await rebuildPose();
+    mpClock += 1;
+    res = fresh.detectForVideo(video, mpClock);
+  }
+  const lms = res.landmarks && res.landmarks[0];
+  if (!lms) return null;
+  const W = video.videoWidth;
+  const H = video.videoHeight;
+  const keypoints = {};
+  for (const idx in LANDMARK_NAMES) {
+    const l = lms[Number(idx)];
+    if (!l) continue;
+    keypoints[LANDMARK_NAMES[idx]] = {
+      x: l.x * W, y: l.y * H, z: (l.z ?? 0) * W, score: l.visibility ?? 1,
+    };
+  }
+  return { timeMs: 0, width: W, height: H, keypoints };
+}
+
 // Detect a pose track across the whole clip.
 // Returns [{ timeMs, width, height, keypoints }] in the shape engine.js wants.
 export async function detectSwing(video, { fps = 30, maxFrames = 90 } = {}, onProgress) {
