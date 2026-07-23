@@ -543,6 +543,29 @@ function makeSummaryDataUrl() {
   return c.toDataURL('image/png');
 }
 
+// ---------- suggestion box ----------
+// Suggestions become public GitHub issues on the project repo — the one
+// place both the owner and the assistant can read them later.
+const SUGGEST_URL = 'https://github.com/wmalinzak-dot/swing-coach-pro/issues/new';
+
+function buildSuggestionUrl(text) {
+  const t = String(text || '').trim();
+  const title = t.length > 60 ? t.slice(0, 57) + '…' : (t || 'Suggestion');
+  const body = (t || '(no text entered)') +
+    '\n\n—\nSent from the suggestion box on the Swing Coach Pro site.';
+  return `${SUGGEST_URL}?title=${encodeURIComponent('[Suggestion] ' + title)}&body=${encodeURIComponent(body)}`;
+}
+
+function sendSuggestion() {
+  const el = $('suggest-text');
+  window.open(buildSuggestionUrl(el.value), '_blank', 'noopener');
+  el.value = '';
+}
+$('suggest-send').addEventListener('click', sendSuggestion);
+$('suggest-text').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendSuggestion();
+});
+
 // ---------- PWA ----------
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('./sw.js').catch(() => { /* offline shell is optional */ });
@@ -552,6 +575,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 window.__scp = {
   totalFaults: () => (state.results ? state.results.reduce((n, f) => n + f.faults.length, 0) : -1),
   summaryCardLength: () => makeSummaryDataUrl().length,
+  suggestionUrl: buildSuggestionUrl,
 };
 
 // ---------- boot ----------

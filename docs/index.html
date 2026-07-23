@@ -21,6 +21,20 @@
     background-attachment: fixed; min-height: 100vh; -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 640px; margin: 0 auto; padding: 28px 18px 80px; }
+  .suggest { background: var(--turf); border: 1px solid var(--turf-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 22px; }
+  .suggest-label { display: block; font-size: 13px; font-weight: 700; color: var(--chalk); margin-bottom: 8px; }
+  .suggest-row { display: flex; gap: 8px; }
+  .suggest-row input {
+    flex: 1; background: var(--deep); color: var(--chalk); border: 1px solid var(--turf-line);
+    border-radius: 9px; padding: 10px 12px; font-size: 15px; font-family: var(--font); min-width: 0;
+  }
+  .suggest-row input::placeholder { color: var(--moss); }
+  .suggest-row button {
+    background: var(--good); color: var(--deep); border: none; border-radius: 9px;
+    padding: 10px 16px; font-size: 14px; font-weight: 800; cursor: pointer; transition: filter 120ms;
+  }
+  .suggest-row button:hover { filter: brightness(1.08); }
+  .suggest-note { color: var(--moss); font-size: 11.5px; margin-top: 7px; }
   .brand { font-weight: 900; letter-spacing: 0.18em; font-size: clamp(26px, 8vw, 36px); margin: 4px 0 0; text-wrap: balance; }
   .tagline { color: var(--moss); margin: 6px 0 22px; font-size: 15px; max-width: 52ch; }
   .panel { background: var(--turf); border: 1px solid var(--turf-line); border-radius: 16px; padding: 18px; margin-bottom: 16px; }
@@ -154,6 +168,15 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="suggest">
+    <label class="suggest-label" for="suggest-text">💡 Got an idea to make this better?</label>
+    <div class="suggest-row">
+      <input type="text" id="suggest-text" maxlength="300" placeholder="e.g. Score my chipping too" />
+      <button id="suggest-send">Suggest</button>
+    </div>
+    <div class="suggest-note">Posts publicly to the project's suggestion board on GitHub (free account needed).</div>
+  </div>
+
   <h1 class="brand">SWING COACH&nbsp;PRO</h1>
   <p class="tagline">Upload a swing. It finds where your body is off — at setup, the top, and impact — marks it on the video, scores the swing, and builds your practice plan.</p>
 
