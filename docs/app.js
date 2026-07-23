@@ -12,7 +12,7 @@ import {
   buildIdealModel, describeModel, DEFAULT_PROFILE,
   labelPhases, analyzeFrames, resolvePoint, measureCheckpoints, EDGES, MIN_SCORE,
 } from './engine.js';
-import { detectSwing } from './pose.js';
+import { detectSwing, detectLiveFrame } from './pose.js';
 import { drillFor } from './drills.js';
 import { buildDemoSwing } from './demo.js';
 
@@ -27,11 +27,65 @@ const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt
 const state = {
   profile: { ...DEFAULT_PROFILE },
   sensitivity: 'normal',
+  units: 'imperial', // display only — profile stays metric, the engine's units
   ideal: null,
   results: null,
   isSample: false,
   videoObjectUrl: null,
 };
+
+// The engine thinks in cm/kg; the form shows ft-in/lb/in unless metric.
+const CM_PER_IN = 2.54;
+const LB_PER_KG = 2.2046226218;
+
+function cmToFtIn(cm) {
+  const totalIn = cm / CM_PER_IN;
+  let ft = Math.floor(totalIn / 12);
+  let inch = Math.round(totalIn - ft * 12);
+  if (inch === 12) { ft += 1; inch = 0; }
+  return { ft, inch };
+}
+const fmtHeight = (cm) => {
+  if (state.units === 'metric') return `${Math.round(cm)} cm`;
+  const { ft, inch } = cmToFtIn(cm);
+  return `${ft}'${inch}"`;
+};
+const fmtWeight = (kg) =>
+  state.units === 'metric' ? `${Math.round(kg)} kg` : `${Math.round(kg * LB_PER_KG)} lb`;
+
+function fillUnitFields() {
+  const p = state.profile;
+  const imperial = state.units === 'imperial';
+  if (imperial) {
+    const { ft, inch } = cmToFtIn(p.heightCm);
+    $('heightFt').value = String(ft);
+    $('heightIn').value = String(inch);
+    $('weight').value = String(Math.round(p.weightKg * LB_PER_KG));
+    $('wingspan').value = String(Math.round(p.wingspanCm / CM_PER_IN));
+  } else {
+    $('heightCm').value = String(Math.round(p.heightCm));
+    $('weight').value = String(Math.round(p.weightKg));
+    $('wingspan').value = String(Math.round(p.wingspanCm));
+  }
+  $('height-imperial').hidden = !imperial;
+  $('heightCm').hidden = imperial;
+  $('weight-label').textContent = imperial ? 'Weight (lb)' : 'Weight (kg)';
+  $('wingspan-label').textContent = imperial ? 'Wingspan (in)' : 'Wingspan (cm)';
+}
+
+function readUnitFields() {
+  const n = (id) => Number($(id).value) || 0;
+  if (state.units === 'imperial') {
+    state.profile.heightCm = (n('heightFt') * 12 + n('heightIn')) * CM_PER_IN;
+    state.profile.weightKg = n('weight') / LB_PER_KG;
+    state.profile.wingspanCm = n('wingspan') * CM_PER_IN;
+  } else {
+    state.profile.heightCm = n('heightCm');
+    state.profile.weightKg = n('weight');
+    state.profile.wingspanCm = n('wingspan');
+  }
+  state.profile.age = n('age');
+}
 
 // ---------- strictness ----------
 // Widens (relaxed) or narrows (strict) the personal model's acceptance bands.
@@ -71,24 +125,27 @@ function renderModel() {
     .join('');
   const p = state.ideal.profile;
   $('model-note').textContent =
-    `Adjusted for ${p.heightCm} cm, ${p.weightKg} kg (BMI ${state.ideal.bmi}), ${p.flexibility} flexibility, ${p.club}.` +
+    `Adjusted for ${fmtHeight(p.heightCm)}, ${fmtWeight(p.weightKg)} (BMI ${state.ideal.bmi}), ${p.flexibility} flexibility, ${p.club}.` +
     (state.sensitivity === 'normal' ? '' : ` Thresholds set to ${state.sensitivity}.`);
 }
 
-['heightCm', 'weightKg', 'wingspanCm', 'age'].forEach((k) => {
-  $(k).addEventListener('input', (e) => {
-    state.profile[k] = Number(e.target.value) || 0;
+['heightFt', 'heightIn', 'heightCm', 'weight', 'wingspan', 'age'].forEach((id) => {
+  $(id).addEventListener('input', () => {
+    readUnitFields();
     renderModel();
     if (state.results) rescore();
   });
 });
+
 document.querySelectorAll('.seg').forEach((seg) => {
   const key = seg.dataset.key;
   seg.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       if (key === 'sensitivity') state.sensitivity = btn.dataset.val;
+      else if (key === 'units') state.units = btn.dataset.val;
       else state.profile[key] = btn.dataset.val;
       seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+      if (key === 'units') fillUnitFields();
       renderModel();
       if (state.results) rescore();
     });
@@ -260,13 +317,13 @@ function drawCurrentFrame() {
   const frame = nearestFrame();
   if (!frame) return;
   const scale = rect.width / video.videoWidth;
-  drawSkeleton(frame, scale);
+  drawSkeleton(ctx, frame, scale);
   renderActiveBanner(frame);
 }
 
 // Canvas port of FrameOverlay.js: chalk skeleton, faulty edges in red/amber,
 // dashed circles around the section to change.
-function drawSkeleton(frame, scale) {
+function drawSkeleton(g, frame, scale) {
   const kp = frame.keypoints;
   const faultEdges = new Map();
   const extraEdges = [];
@@ -288,35 +345,35 @@ function drawSkeleton(frame, scale) {
   }
   const X = (v) => v * scale, Y = (v) => v * scale;
 
-  ctx.lineCap = 'round';
+  g.lineCap = 'round';
   for (const [a, b] of EDGES) {
     const pa = kp[a], pb = kp[b];
     if (!pa || !pb || pa.score < MIN_SCORE || pb.score < MIN_SCORE) continue;
     const key = [a, b].slice().sort().join('|');
     const col = faultEdges.get(key);
-    ctx.strokeStyle = col || CHALK;
-    ctx.globalAlpha = col ? 1 : 0.85;
-    ctx.lineWidth = col ? 6 : 3;
-    ctx.beginPath(); ctx.moveTo(X(pa.x), Y(pa.y)); ctx.lineTo(X(pb.x), Y(pb.y)); ctx.stroke();
+    g.strokeStyle = col || CHALK;
+    g.globalAlpha = col ? 1 : 0.85;
+    g.lineWidth = col ? 6 : 3;
+    g.beginPath(); g.moveTo(X(pa.x), Y(pa.y)); g.lineTo(X(pb.x), Y(pb.y)); g.stroke();
   }
-  ctx.globalAlpha = 1;
+  g.globalAlpha = 1;
   for (const e of extraEdges) {
     const pa = resolvePoint(kp, e.a), pb = resolvePoint(kp, e.b);
     if (!pa || !pb) continue;
-    ctx.strokeStyle = e.color; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(X(pa.x), Y(pa.y)); ctx.lineTo(X(pb.x), Y(pb.y)); ctx.stroke();
+    g.strokeStyle = e.color; g.lineWidth = 6;
+    g.beginPath(); g.moveTo(X(pa.x), Y(pa.y)); g.lineTo(X(pb.x), Y(pb.y)); g.stroke();
   }
   for (const name in kp) {
     if (kp[name].score < MIN_SCORE) continue;
-    ctx.fillStyle = CHALK;
-    ctx.beginPath(); ctx.arc(X(kp[name].x), Y(kp[name].y), 4, 0, Math.PI * 2); ctx.fill();
+    g.fillStyle = CHALK;
+    g.beginPath(); g.arc(X(kp[name].x), Y(kp[name].y), 4, 0, Math.PI * 2); g.fill();
   }
-  ctx.setLineDash([14 * scale, 8 * scale]);
+  g.setLineDash([14 * scale, 8 * scale]);
   for (const c of circles) {
-    ctx.strokeStyle = c.color; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.arc(X(c.cx), Y(c.cy), c.r * scale, 0, Math.PI * 2); ctx.stroke();
+    g.strokeStyle = c.color; g.lineWidth = 4;
+    g.beginPath(); g.arc(X(c.cx), Y(c.cy), c.r * scale, 0, Math.PI * 2); g.stroke();
   }
-  ctx.setLineDash([]);
+  g.setLineDash([]);
 }
 
 function renderActiveBanner(frame) {
@@ -543,6 +600,98 @@ function makeSummaryDataUrl() {
   return c.toDataURL('image/png');
 }
 
+// ---------- live stance check ----------
+// The engine treats a lone frame as the setup position (labelPhases marks
+// frame 0 as 'setup'), so one-frame analysis IS a stance check — the same
+// spine-tilt and knee-flex faults, tips and thresholds as video analysis,
+// running live on the webcam.
+let liveStream = null;
+let liveRunning = false;
+
+async function startStance() {
+  setStatus('');
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user' }, audio: false,
+    });
+  } catch (e) {
+    setStatus('Camera unavailable: ' + (e.message || e.name) + '. Allow camera access and try again.', true);
+    return;
+  }
+  const v = $('live-video');
+  v.srcObject = liveStream;
+  try { await v.play(); } catch { /* autoplay quirks — playsinline covers iOS */ }
+  $('live-stage').hidden = false;
+  $('stance-stop').hidden = false;
+  $('stance').hidden = true;
+  liveRunning = true;
+  liveLoop();
+}
+
+async function liveLoop() {
+  const v = $('live-video');
+  while (liveRunning) {
+    if (v.videoWidth) {
+      let frame = null;
+      try { frame = await detectLiveFrame(v); } catch { /* transient */ }
+      if (liveRunning) drawLive(frame, v);
+    }
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+}
+
+function drawLive(frame, v) {
+  const cvs = $('live-overlay');
+  const rect = v.getBoundingClientRect();
+  if (!rect.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (cvs.width !== Math.round(rect.width * dpr)) {
+    cvs.width = Math.round(rect.width * dpr);
+    cvs.height = Math.round(rect.height * dpr);
+    cvs.style.width = rect.width + 'px';
+    cvs.style.height = rect.height + 'px';
+  }
+  const g = cvs.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, rect.width, rect.height);
+
+  const chips = $('live-chips');
+  if (!frame) {
+    chips.hidden = false;
+    chips.innerHTML = '<span class="chip minor">Step back — whole body in frame</span>';
+    return;
+  }
+  const analyzed = analyzeFrames(labelPhases([frame], state.ideal.profile.handedness), state.ideal);
+  const faults = analyzed[0].faults;
+  drawSkeleton(g, analyzed[0], rect.width / frame.width);
+  chips.hidden = false;
+  chips.innerHTML = faults.length === 0
+    ? '<span class="chip good-chip">✓ Stance on plan — swing away</span>'
+    : faults.map((f) =>
+        `<span class="chip ${f.severity}">${f.severity === 'major' ? '⨯' : '△'} ${esc(f.label)}</span>`
+      ).join('');
+}
+
+function stopStance() {
+  liveRunning = false;
+  if (liveStream) {
+    liveStream.getTracks().forEach((t) => t.stop());
+    liveStream = null;
+  }
+  const v = $('live-video');
+  v.srcObject = null;
+  $('live-stage').hidden = true;
+  $('stance-stop').hidden = true;
+  $('stance').hidden = false;
+  $('live-chips').innerHTML = '';
+}
+
+$('stance').addEventListener('click', startStance);
+$('stance-stop').addEventListener('click', stopStance);
+// Picking or analyzing a video ends the live session and frees the camera.
+$('file').addEventListener('change', stopStance);
+$('analyze').addEventListener('click', stopStance);
+
 // ---------- suggestion box ----------
 // Suggestions open the visitor's own mail app, pre-addressed to the owner —
 // no account and no backend, and submissions land straight in the inbox.
@@ -583,5 +732,6 @@ window.__scp = {
 };
 
 // ---------- boot ----------
+fillUnitFields();
 renderModel();
 renderHistory();

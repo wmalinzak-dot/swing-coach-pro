@@ -48,6 +48,9 @@
     border-radius: 9px; padding: 11px 12px; font-size: 16px; font-family: var(--mono); font-variant-numeric: tabular-nums;
   }
   input:focus-visible, button:focus-visible { outline: 2px solid var(--good); outline-offset: 1px; }
+  .height-imperial { display: flex; gap: 6px; align-items: center; }
+  .height-imperial input { flex: 1; min-width: 0; }
+  .unit-suffix { color: var(--moss); font-size: 13px; flex-shrink: 0; }
   .seg { display: flex; gap: 8px; }
   .seg button {
     flex: 1; background: var(--deep); color: var(--moss); border: 1px solid var(--turf-line);
@@ -71,12 +74,16 @@
   input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 
   .stage { position: relative; margin-top: 14px; border-radius: 14px; overflow: hidden; background: #000; line-height: 0; }
+  /* Selfie view: mirror video AND overlay together so the skeleton stays aligned */
+  .stage.mirror video, .stage.mirror canvas { transform: scaleX(-1); }
+  .stage.mirror .active { transform: none; }
   .stage video { width: 100%; height: auto; display: block; }
   .stage canvas { position: absolute; inset: 0; pointer-events: none; }
   .active { position: absolute; left: 10px; right: 10px; top: 10px; display: flex; flex-wrap: wrap; gap: 6px; line-height: 1.3; }
   .chip { font-size: 12px; font-weight: 700; padding: 4px 9px; border-radius: 999px; background: rgba(6,27,16,0.82); }
   .chip.major { color: #ffd7d8; box-shadow: inset 0 0 0 1px var(--flag); }
   .chip.minor { color: #ffe6c2; box-shadow: inset 0 0 0 1px var(--amber); }
+  .chip.good-chip { color: #d5f5df; box-shadow: inset 0 0 0 1px var(--good); }
 
   .pb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
   .pb button {
@@ -182,10 +189,25 @@
 
   <div class="panel">
     <div class="section">Your body</div>
+    <div class="field"><label>Units</label>
+      <div class="seg" data-key="units">
+        <button data-val="imperial" aria-pressed="true">imperial</button>
+        <button data-val="metric" aria-pressed="false">metric</button>
+      </div>
+    </div>
     <div class="grid2">
-      <div class="field"><label for="heightCm">Height (cm)</label><input type="number" id="heightCm" value="178" inputmode="numeric" /></div>
-      <div class="field"><label for="weightKg">Weight (kg)</label><input type="number" id="weightKg" value="80" inputmode="numeric" /></div>
-      <div class="field"><label for="wingspanCm">Wingspan (cm)</label><input type="number" id="wingspanCm" value="178" inputmode="numeric" /></div>
+      <div class="field">
+        <label id="height-label">Height</label>
+        <div class="height-imperial" id="height-imperial">
+          <input type="number" id="heightFt" inputmode="numeric" aria-label="Height, feet" />
+          <span class="unit-suffix">ft</span>
+          <input type="number" id="heightIn" inputmode="numeric" aria-label="Height, inches" />
+          <span class="unit-suffix">in</span>
+        </div>
+        <input type="number" id="heightCm" inputmode="numeric" hidden aria-label="Height, centimeters" />
+      </div>
+      <div class="field"><label for="weight" id="weight-label">Weight (lb)</label><input type="number" id="weight" inputmode="numeric" /></div>
+      <div class="field"><label for="wingspan" id="wingspan-label">Wingspan (in)</label><input type="number" id="wingspan" inputmode="numeric" /></div>
       <div class="field"><label for="age">Age</label><input type="number" id="age" value="35" inputmode="numeric" /></div>
     </div>
     <div class="section sub">Swing setup</div>
@@ -231,6 +253,14 @@
       <span>Face-on, whole body in frame. MP4 (H.264) works best. Nothing leaves your device.</span>
       <input type="file" id="file" accept="video/*" />
     </label>
+
+    <button class="ghost" id="stance">📷 Live stance check — get set up right before you swing</button>
+    <div class="stage mirror" id="live-stage" hidden>
+      <video id="live-video" playsinline muted autoplay></video>
+      <canvas id="live-overlay"></canvas>
+      <div class="active" id="live-chips"></div>
+    </div>
+    <button class="cta" id="stance-stop" hidden>Done — stop camera</button>
 
     <div class="stage" id="stage" hidden>
       <video id="video" playsinline controls muted></video>
