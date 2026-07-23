@@ -2,7 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web",
+      "name": "web-app",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8091", "--directory", "docs"],
+      "port": 8091
+    },
+    {
+      "name": "expo-web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "web"],
       "port": 8081
