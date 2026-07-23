@@ -1,0 +1,13 @@
+{
+  "name": "Swing Coach Pro",
+  "short_name": "SwingCoach",
+  "description": "Upload a golf swing video — get fault marks on the video and a drill for each, all in your browser.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#082516",
+  "theme_color": "#082516",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
