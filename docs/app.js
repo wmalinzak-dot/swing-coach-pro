@@ -15,8 +15,13 @@ import {
 import { detectSwing, detectLiveFrame } from './pose.js';
 import { drillFor } from './drills.js';
 import { buildDemoSwing } from './demo.js';
+import {
+  trackClubhead, trackBallFlight, findBall, placeBall, clubMetrics, clubTargets,
+  applyClubFaults, clubCheckpointRows,
+} from './clubTrack.js';
 
 const FLAG = '#e4353b', AMBER = '#e8a33d', CHALK = '#f2efe6', GOOD = '#8fd6a5';
+const TRACER = '#ffd76a'; // shot tracer — reads against both sky and turf
 const KEY_PHASES = ['setup', 'top', 'impact'];
 const HISTORY_KEY = 'scp-history';
 const FRAME_STEP = 1 / 30;
@@ -30,6 +35,10 @@ const state = {
   units: 'imperial', // display only — profile stays metric, the engine's units
   ideal: null,
   results: null,
+  club: null,        // clubhead/ball metrics for the current swing
+  clubTrack: null,   // scale + hit count from the pixel tracker
+  showClubPath: true,
+  showTracer: true,
   isSample: false,
   videoObjectUrl: null,
 };
@@ -152,11 +161,25 @@ document.querySelectorAll('.seg').forEach((seg) => {
   });
 });
 
+// One pipeline for every path into the results: analyze, demo and rescore all
+// go through here, so club metrics can never fall out of step with the score.
+function scoreFrames(rawFrames) {
+  const labeled = labelPhases(rawFrames, state.ideal.profile.handedness);
+  const analyzed = analyzeFrames(labeled, state.ideal);
+  placeBall(analyzed, analyzed[0]?.keypoints?.ball);
+  const targets = clubTargets(state.ideal.profile, state.sensitivity);
+  const metrics = clubMetrics(analyzed, state.ideal, state.clubTrack || {});
+  // The sample skeleton is schematic rather than anatomically scaled, so its
+  // pixels-per-cm — and therefore any speed read off them — is meaningless.
+  if (state.isSample) metrics.speedMph = null;
+  state.club = metrics;
+  return applyClubFaults(analyzed, metrics, targets, state.ideal.profile);
+}
+
 // Re-run scoring on an existing pose track when the profile or thresholds change.
 function rescore() {
   if (!state.results) return;
-  const labeled = labelPhases(state.results.map(stripFault), state.ideal.profile.handedness);
-  state.results = analyzeFrames(labeled, state.ideal);
+  state.results = scoreFrames(state.results.map(stripFault));
   renderAll();
   drawCurrentFrame();
 }
@@ -214,6 +237,16 @@ document.querySelectorAll('[data-rate]').forEach((btn) => {
 });
 $('step-back').addEventListener('click', () => stepFrame(-1));
 $('step-fwd').addEventListener('click', () => stepFrame(1));
+$('toggle-club').addEventListener('click', () => {
+  state.showClubPath = !state.showClubPath;
+  $('toggle-club').setAttribute('aria-pressed', String(state.showClubPath));
+  drawCurrentFrame();
+});
+$('toggle-tracer').addEventListener('click', () => {
+  state.showTracer = !state.showTracer;
+  $('toggle-tracer').setAttribute('aria-pressed', String(state.showTracer));
+  drawCurrentFrame();
+});
 function stepFrame(dir) {
   if (!video.duration) return;
   video.pause();
@@ -243,16 +276,17 @@ $('analyze').addEventListener('click', async () => {
   setStatus('Warming up…');
   try {
     video.pause();
-    const frames = await detectSwing(video, { fps: 30, maxFrames: 90 }, (i, n) => {
+    const frames = await detectSwing(video, { fps: 30, maxFrames: 90, grey: true }, (i, n) => {
       if (typeof n === 'number') setStatus(`Detecting your body — frame ${i}/${n}…`);
       else setStatus(i);
     });
     if (frames.length < 4) {
       throw new Error('Could not find a full body. Film face-on with your whole body in frame, in good light.');
     }
-    const labeled = labelPhases(frames, state.ideal.profile.handedness);
-    state.results = analyzeFrames(labeled, state.ideal);
+    setStatus('Following the clubhead…');
+    await trackClub(frames);
     state.isSample = false;
+    state.results = scoreFrames(frames);
     setStatus('');
     recordHistory();
     renderAll();
@@ -267,10 +301,47 @@ $('analyze').addEventListener('click', async () => {
   }
 });
 
+// Seek and wait for the picture to actually be there, so the ball search reads
+// the address frame rather than whatever was on screen a moment ago.
+function seekTo(seconds) {
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    video.addEventListener('seeked', done, { once: true });
+    video.addEventListener('error', done, { once: true });
+    video.currentTime = seconds;
+  });
+}
+
+// Find the ball at address, follow the clubhead through the swing, then throw
+// the greyscale buffers away — 90 frames of them is real memory and they have
+// no use once the track exists.
+async function trackClub(frames) {
+  state.club = null;
+  state.clubTrack = null;
+  try {
+    await seekTo(Math.max(0, frames[0].timeMs / 1000));
+    const ball = findBall(video, frames[0], state.ideal);
+    if (ball) frames[0].keypoints.ball = ball;
+    state.clubTrack = trackClubhead(frames, state.ideal, ball);
+    // The tracer needs to know which frame is impact, and phase labelling is a
+    // pure function of the pose track — so run it here rather than threading
+    // the index back out of scoreFrames later. It gets computed identically
+    // there; this is cheap and keeps the greyscale buffers in one place.
+    const impactIdx = labelPhases(frames, state.ideal.profile.handedness)
+      .findIndex((f) => f.phase === 'impact');
+    trackBallFlight(frames, state.ideal, ball, impactIdx);
+  } catch {
+    // Tracking is a bonus on top of the body analysis — never let it take the
+    // whole result down with it.
+  } finally {
+    for (const f of frames) delete f.grey;
+  }
+}
+
 $('demo').addEventListener('click', () => {
-  const labeled = labelPhases(buildDemoSwing(), state.ideal.profile.handedness);
-  state.results = analyzeFrames(labeled, state.ideal);
   state.isSample = true;
+  state.clubTrack = null;
+  state.results = scoreFrames(buildDemoSwing());
   recordHistory();
   renderAll();
   renderPhaseChips();
@@ -317,8 +388,89 @@ function drawCurrentFrame() {
   const frame = nearestFrame();
   if (!frame) return;
   const scale = rect.width / video.videoWidth;
+  if (state.showClubPath) drawClubPath(ctx, frame, scale);
+  if (state.showTracer) drawTracer(ctx, frame, scale);
   drawSkeleton(ctx, frame, scale);
   renderActiveBanner(frame);
+}
+
+// The shot tracer: the ball's flight off the face, drawn as it happens.
+//
+// It stops where the tracking stopped, plus a short extrapolation that fades
+// out. Real broadcast tracers follow the ball to the ground; this one has a
+// handful of frames of a departing ball and no idea where it lands, so it
+// shows the line it actually measured and lets it dissolve rather than
+// inventing a landing spot.
+function drawTracer(g, frame, scale) {
+  if (!state.results) return;
+  const flight = state.results
+    .filter((f) => f.keypoints.ball && f.keypoints.ball.flight && f.timeMs <= frame.timeMs)
+    .map((f) => f.keypoints.ball);
+  if (!flight.length) return;
+
+  // Anchor the line on the ball where it was struck, not on the first frame
+  // the tracker managed to catch it.
+  const impact = state.results.find((f) => f.phase === 'impact');
+  const struck = impact?.keypoints?.ball;
+  const pts = struck && !struck.flight ? [struck, ...flight] : flight;
+  if (pts.length < 2) return;
+
+  const X = (v) => v * scale, Y = (v) => v * scale;
+  g.save();
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.shadowColor = 'rgba(0,0,0,0.55)';
+  g.shadowBlur = 6;
+  g.strokeStyle = TRACER;
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(X(pts[0].x), Y(pts[0].y));
+  for (let i = 1; i < pts.length; i++) g.lineTo(X(pts[i].x), Y(pts[i].y));
+  g.stroke();
+
+  // Carry the last measured direction on a little way, fading, so the eye
+  // reads "still going" instead of "stopped dead in mid-air".
+  const a = pts[pts.length - 2], b = pts[pts.length - 1];
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const steps = 5;
+  for (let i = 0; i < steps; i++) {
+    g.globalAlpha = 0.5 * (1 - i / steps);
+    g.beginPath();
+    g.moveTo(X(b.x + dx * i * 0.4), Y(b.y + dy * i * 0.4));
+    g.lineTo(X(b.x + dx * (i + 1) * 0.4), Y(b.y + dy * (i + 1) * 0.4));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  // The ball itself, at the head of the line.
+  g.fillStyle = TRACER;
+  g.beginPath(); g.arc(X(b.x), Y(b.y), 5, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+
+// The clubhead's route through the swing, drawn up to wherever playback is.
+// Older positions fade out, so at any instant you can see the arc the club has
+// travelled and where it is heading — the shape of the swing, not just a dot.
+function drawClubPath(g, frame, scale) {
+  if (!state.results) return;
+  const pts = state.results
+    .filter((f) => f.timeMs <= frame.timeMs && f.keypoints.clubhead)
+    .map((f) => f.keypoints.clubhead);
+  if (pts.length < 2) return;
+  const X = (v) => v * scale, Y = (v) => v * scale;
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  for (let i = 1; i < pts.length; i++) {
+    // Fade with age: the newest segment is fully lit, the takeaway is a ghost.
+    g.globalAlpha = 0.18 + 0.62 * (i / (pts.length - 1));
+    g.strokeStyle = GOOD;
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(X(pts[i - 1].x), Y(pts[i - 1].y));
+    g.lineTo(X(pts[i].x), Y(pts[i].y));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
 }
 
 // Canvas port of FrameOverlay.js: chalk skeleton, faulty edges in red/amber,
@@ -364,16 +516,47 @@ function drawSkeleton(g, frame, scale) {
     g.beginPath(); g.moveTo(X(pa.x), Y(pa.y)); g.lineTo(X(pb.x), Y(pb.y)); g.stroke();
   }
   for (const name in kp) {
+    // The club and the ball are not body joints — they get their own marks below.
+    if (name === 'clubhead' || name === 'ball') continue;
     if (kp[name].score < MIN_SCORE) continue;
     g.fillStyle = CHALK;
     g.beginPath(); g.arc(X(kp[name].x), Y(kp[name].y), 4, 0, Math.PI * 2); g.fill();
   }
+  drawClub(g, kp, X, Y);
   g.setLineDash([14 * scale, 8 * scale]);
   for (const c of circles) {
     g.strokeStyle = c.color; g.lineWidth = 4;
     g.beginPath(); g.arc(X(c.cx), Y(c.cy), c.r * scale, 0, Math.PI * 2); g.stroke();
   }
   g.setLineDash([]);
+}
+
+// The shaft (hands to clubhead), the clubhead itself, and the ball. Drawn on
+// top of the skeleton so the club reads as one object with the body.
+function drawClub(g, kp, X, Y) {
+  const club = kp.clubhead;
+  // A ball in flight belongs to the tracer, which draws its own head marker.
+  const ball = kp.ball && !kp.ball.flight ? kp.ball : null;
+  if (ball) {
+    g.strokeStyle = CHALK;
+    g.lineWidth = 2;
+    g.globalAlpha = ball.estimated ? 0.5 : 1; // a guessed ball says so, faintly
+    g.beginPath(); g.arc(X(ball.x), Y(ball.y), 6, 0, Math.PI * 2); g.stroke();
+    g.globalAlpha = 1;
+  }
+  if (!club) return;
+  const hands = kp.left_wrist && kp.right_wrist
+    ? { x: (kp.left_wrist.x + kp.right_wrist.x) / 2, y: (kp.left_wrist.y + kp.right_wrist.y) / 2 }
+    : kp.left_wrist || kp.right_wrist;
+  if (hands) {
+    g.strokeStyle = CHALK;
+    g.globalAlpha = 0.9;
+    g.lineWidth = 3;
+    g.beginPath(); g.moveTo(X(hands.x), Y(hands.y)); g.lineTo(X(club.x), Y(club.y)); g.stroke();
+    g.globalAlpha = 1;
+  }
+  g.fillStyle = GOOD;
+  g.beginPath(); g.arc(X(club.x), Y(club.y), 6, 0, Math.PI * 2); g.fill();
 }
 
 function renderActiveBanner(frame) {
@@ -438,6 +621,7 @@ function renderAll() {
         <tbody>${metrics.map(metricRow).join('')}</tbody>
       </table>
     </div>` : '';
+  const clubHtml = renderClubPanel();
 
   el.innerHTML = `
     <div class="scorecard">
@@ -447,6 +631,7 @@ function renderAll() {
       <button class="ghost share" id="share">Download summary card (PNG)</button>
     </div>
     ${metricsHtml}
+    ${clubHtml}
     ${found.map((row) => faultCard(row, hasVideo && !state.isSample)).join('')}`;
 
   el.querySelectorAll('[data-jump]').forEach((btn) => {
@@ -468,12 +653,70 @@ function renderAll() {
 }
 
 function metricRow(r) {
-  const you = r.measured == null ? '—' : `${r.measured}${r.unit}`;
+  // Club rows carry fractional targets (a 3.0:1 tempo, a 1.5" low point), so
+  // only whole-degree body targets get rounded.
+  const n = (v) => (Number.isInteger(v) ? v : Math.round(v * 10) / 10);
+  const you = r.measured == null ? '—' : `${n(r.measured)}${r.unit}`;
   const target =
-    r.kind === 'range' ? `${Math.round(r.target[0])}–${Math.round(r.target[1])}${r.unit}` :
-    r.kind === 'min' ? `≥ ${Math.round(r.target)}${r.unit}` : `≤ ${Math.round(r.target)}${r.unit}`;
+    r.kind === 'info' || r.target == null ? '—' :
+    r.kind === 'range' ? `${n(r.target[0])}–${n(r.target[1])}${r.unit}` :
+    r.kind === 'min' ? `≥ ${n(r.target)}${r.unit}` : `≤ ${n(r.target)}${r.unit}`;
   const mark = r.ok == null ? '<span class="na">·</span>' : r.ok ? '<span class="ok">✓</span>' : '<span class="bad">⨯</span>';
   return `<tr><td>${esc(r.label)}</td><td class="num">${you}</td><td class="num">${target}</td><td>${mark}</td></tr>`;
+}
+
+// ---------- club & ball panel ----------
+// Separate from the body checkpoints because these numbers come from a
+// different kind of measurement — pixels rather than landmarks — and carry
+// different caveats. Saying so is part of the result.
+function renderClubPanel() {
+  const m = state.club;
+  if (!m) return '';
+  const targets = clubTargets(state.ideal.profile, state.sensitivity);
+  const rows = clubCheckpointRows(m, targets, state.units);
+
+  const notes = [];
+  // Tempo needs no pixels, so it turns up even when tracking found nothing at
+  // all — which would otherwise leave a club panel with no hint that the club
+  // part of it silently failed.
+  if (m.quality === 'none') {
+    notes.push("Couldn't follow the clubhead in this clip, so only tempo is shown. Club tracking needs a plain, contrasty background and the club in frame through the whole swing.");
+  } else if (m.quality === 'weak') {
+    notes.push('The clubhead was only picked up intermittently, so the arc could not be measured reliably. Try better light or a plainer background.');
+  }
+  if (m.slowMo) {
+    notes.push('This looks like a slow-mo clip, so clubhead speed is left out — the tempo ratio is unaffected by slow motion.');
+  }
+  if (m.speedMph != null) {
+    notes.push('Speed is estimated from a face-on 2D arc and reads low against a launch monitor. Track it against itself, not against the range.');
+  }
+  if (m.lowPointCm != null && targets.lowPointMinCm != null) {
+    notes.push(m.ballDetected
+      ? 'Ball found in the picture, so the low point is measured against the real thing.'
+      : 'No ball visible at address — the low point is measured against where your stance says it should be.');
+  }
+  // The tracer's limit is physics, not code: a struck ball crosses a frame
+  // this size in about 1/30s, so normal-speed video has nothing to follow.
+  if (m.tracerQuality === 'ok') {
+    notes.push(`Ball tracer: followed the ball for ${m.flightPoints} frames off the face. Launch angle is measured from that line.`);
+  } else if (!state.isSample) {
+    notes.push(m.tracerQuality === 'weak'
+      ? 'The ball was only caught in one frame after impact, which is not enough for a tracer. A slow-mo clip (120/240fps) gives it several.'
+      : 'No ball tracer: at normal speed a struck ball crosses the whole frame between one frame and the next. Film in slow-mo (120/240fps) and it can follow the flight.');
+  }
+  if (state.isSample) notes.push('Sample swing: the stick figure is schematic, so speed is not computed for it.');
+
+  if (!rows.length && !notes.length) return '';
+  return `
+    <div class="panel">
+      <div class="section">Club &amp; ball</div>
+      ${rows.length ? `
+        <table class="metrics-table">
+          <thead><tr><th scope="col">Measurement</th><th scope="col">You</th><th scope="col">Target</th><th scope="col"></th></tr></thead>
+          <tbody>${rows.map(metricRow).join('')}</tbody>
+        </table>` : ''}
+      ${notes.map((t) => `<div class="note">${esc(t)}</div>`).join('')}
+    </div>`;
 }
 
 function faultCard({ fault, timeMs, phase }, hasVideo) {
@@ -582,6 +825,19 @@ function makeSummaryDataUrl() {
   g.fillStyle = '#9dbfa9'; g.font = '20px system-ui'; g.fillText(new Date().toLocaleDateString(), 60, 130);
   g.fillStyle = CHALK; g.font = '900 130px system-ui'; g.fillText(String(score), 60, 280);
   g.font = '800 40px system-ui'; g.fillText(`${grade} · ${gradeLabel}`, 60, 340);
+
+  const m = state.club;
+  const clubBits = [];
+  if (m) {
+    if (m.tempoRatio != null) clubBits.push(`tempo ${m.tempoRatio.toFixed(1)}:1`);
+    if (m.speedMph != null) clubBits.push(`${m.speedMph} mph est.`);
+    if (m.attackAngle != null) clubBits.push(`attack ${m.attackAngle > 0 ? '+' : ''}${m.attackAngle.toFixed(1)}°`);
+  }
+  if (clubBits.length) {
+    g.fillStyle = GOOD; g.font = '700 22px system-ui';
+    g.fillText(clubBits.join('   ·   '), 60, 376);
+  }
+
   g.fillStyle = '#9dbfa9'; g.font = '700 22px system-ui';
   g.fillText(found.length ? 'Top fixes:' : 'No faults crossed your thresholds.', 60, 404);
   g.font = '20px system-ui';

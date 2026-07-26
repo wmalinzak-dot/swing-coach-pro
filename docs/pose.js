@@ -10,10 +10,18 @@
 // external hosts — which is exactly why this app is deployed rather than
 // published as an Artifact.
 
-import { PoseLandmarker, FilesetResolver } from
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/vision_bundle.mjs';
 import { LANDMARK_NAMES } from './engine.js';
+import { sampleGrey } from './clubTrack.js';
 
+// Imported lazily, inside initPose, rather than at the top of the module. A
+// static import of a CDN module makes the CDN a hard dependency of the page
+// *booting*: offline, or behind a firewall that doesn't like jsDelivr, the
+// import fails, app.js never evaluates and nothing works — not the profile
+// form, not the sample analysis, not even the error message explaining why.
+// Deferring it means the network is only needed by the thing that actually
+// needs the network, which is what the service worker's offline shell has
+// always claimed.
+const RUNTIME = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/vision_bundle.mjs';
 const WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.20/wasm';
 const MODEL =
   'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task';
@@ -37,6 +45,15 @@ async function rebuildPose(onStatus) {
 export async function initPose(onStatus) {
   if (landmarker) return landmarker;
   onStatus && onStatus('Loading the pose engine (first run downloads ~10 MB)…');
+  let PoseLandmarker, FilesetResolver;
+  try {
+    ({ PoseLandmarker, FilesetResolver } = await import(/* @vite-ignore */ RUNTIME));
+  } catch (e) {
+    throw new Error(
+      'Could not load the pose engine from the network. Pose detection needs a ' +
+      'connection the first time — the sample analysis works offline.'
+    );
+  }
   const fileset = await FilesetResolver.forVisionTasks(WASM);
   try {
     landmarker = await PoseLandmarker.createFromOptions(fileset, {
@@ -109,7 +126,12 @@ export async function detectLiveFrame(video) {
 
 // Detect a pose track across the whole clip.
 // Returns [{ timeMs, width, height, keypoints }] in the shape engine.js wants.
-export async function detectSwing(video, { fps = 30, maxFrames = 90 } = {}, onProgress) {
+//
+// With `grey: true` each frame also carries a downscaled greyscale copy of the
+// picture. Seeking is by far the expensive part of this loop, so the club
+// tracker rides along on the seeks already happening rather than walking the
+// video a second time. The caller drops the buffers once tracking is done.
+export async function detectSwing(video, { fps = 30, maxFrames = 90, grey = false } = {}, onProgress) {
   let lm = await initPose(onProgress);
   const dur = Math.max(0.2, video.duration || 0);
   const n = Math.min(maxFrames, Math.max(8, Math.round(dur * fps)));
@@ -158,7 +180,9 @@ export async function detectSwing(video, { fps = 30, maxFrames = 90 } = {}, onPr
         score: l.visibility ?? 1,
       };
     }
-    frames.push({ timeMs: Math.round(t * 1000), width: W, height: H, keypoints });
+    const frame = { timeMs: Math.round(t * 1000), width: W, height: H, keypoints };
+    if (grey) frame.grey = sampleGrey(video);
+    frames.push(frame);
   }
   return frames;
 }
