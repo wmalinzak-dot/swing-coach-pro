@@ -12,8 +12,8 @@
 
 import {
   fitCircle, estimatePxPerCm, estimateBallPoint, targetDirection, placeBall,
-  trackClubhead, clubMetrics, clubTargets, clubFaults, applyClubFaults,
-  clubCheckpointRows, CLUB_LENGTH_CM, TRACK_W,
+  trackClubhead, trackBallFlight, clubMetrics, clubTargets, clubFaults,
+  applyClubFaults, clubCheckpointRows, CLUB_LENGTH_CM, TRACK_W,
 } from '../../docs/clubTrack';
 import { buildIdealModel, labelPhases, analyzeFrames } from '../../docs/engine';
 import { buildDemoSwing } from '../../docs/demo';
@@ -240,6 +240,152 @@ function arcSwing({
 
 const measure = (frames, ideal) =>
   clubMetrics(analyzeFrames(labelPhases(frames, ideal.profile.handedness), ideal), ideal);
+
+// --- the ball tracer ------------------------------------------------------
+
+// A struck ball leaving the frame, as synthetic greyscale. `perFrame` is how
+// far it travels between samples: at normal speed that is most of a frame
+// width and the tracer legitimately gets nothing, which is the physics the
+// feature is gated on.
+function flightFrames({ perFrame = { x: -60, y: -14 }, n = 6, start = { x: 374, y: 755 } } = {}) {
+  const W = 800, H = 900;
+  const gw = TRACK_W, gh = Math.round((H / W) * TRACK_W);
+  const scale = gw / W;
+  const frames = [];
+  // Four frames of swing before impact so labelling and masking have a body.
+  const wristTrack = [500, 300, 215, 400, 505];
+  for (let i = 0; i < 5; i++) {
+    frames.push({
+      timeMs: i * 33, width: W, height: H,
+      keypoints: body({ wristY: wristTrack[i] }),
+      grey: greyFrame(gw, gh, [{ x: Math.round(start.x * scale), y: Math.round(start.y * scale), r: 2 }]),
+    });
+  }
+  const impactIdx = 4;
+  for (let k = 1; k <= n; k++) {
+    const x = start.x + perFrame.x * k;
+    const y = start.y + perFrame.y * k;
+    const dots = [];
+    if (x > 0 && x < W && y > 0 && y < H) {
+      dots.push({ x: Math.round(x * scale), y: Math.round(y * scale), r: 2 });
+    }
+    frames.push({
+      timeMs: (impactIdx + k) * 33, width: W, height: H,
+      keypoints: body({ wristY: 400 }),
+      grey: greyFrame(gw, gh, dots),
+      truth: { x, y },
+    });
+  }
+  return { frames, impactIdx, start };
+}
+
+describe('trackBallFlight — follows the ball off the face', () => {
+  it('picks up a ball leaving toward the target and climbing', () => {
+    const { frames, impactIdx, start } = flightFrames();
+    const res = trackBallFlight(frames, IDEAL, { ...start, score: 0.9 }, impactIdx);
+    expect(res.quality).toBe('ok');
+    expect(res.points.length).toBeGreaterThanOrEqual(3);
+
+    const errs = frames
+      .filter((f) => f.truth && f.keypoints.ball && f.keypoints.ball.flight)
+      .map((f) => Math.hypot(f.keypoints.ball.x - f.truth.x, f.keypoints.ball.y - f.truth.y));
+    expect(Math.max(...errs)).toBeLessThan(25);
+  });
+
+  it('flags the flight points so they are never confused with the ball at rest', () => {
+    const { frames, impactIdx, start } = flightFrames();
+    trackBallFlight(frames, IDEAL, { ...start, score: 0.9 }, impactIdx);
+    const flagged = frames.filter((f) => f.keypoints.ball && f.keypoints.ball.flight);
+    expect(flagged.length).toBeGreaterThan(1);
+    // Nothing before impact may be marked as in flight.
+    expect(frames.slice(0, impactIdx + 1).some((f) => f.keypoints.ball && f.keypoints.ball.flight))
+      .toBe(false);
+  });
+
+  it('reports nothing when the ball clears the frame in one step', () => {
+    // A driver at normal speed: gone before the next sample. No points is the
+    // correct answer here, not a tracer drawn through a guess.
+    const { frames, impactIdx, start } = flightFrames({ perFrame: { x: -820, y: -180 } });
+    const res = trackBallFlight(frames, IDEAL, { ...start, score: 0.9 }, impactIdx);
+    expect(res.points.length).toBeLessThan(2);
+    expect(res.quality).not.toBe('ok');
+  });
+
+  it('will not follow something heading into the ground', () => {
+    // Downward and away from the target — whatever that is, it is not a
+    // struck ball, so the direction prior has to reject it.
+    const { frames, impactIdx, start } = flightFrames({ perFrame: { x: 60, y: 70 } });
+    const res = trackBallFlight(frames, IDEAL, { ...start, score: 0.9 }, impactIdx);
+    expect(res.quality).not.toBe('ok');
+  });
+
+  it('does nothing without a ball to start from', () => {
+    const { frames, impactIdx } = flightFrames();
+    expect(trackBallFlight(frames, IDEAL, null, impactIdx).points).toHaveLength(0);
+  });
+});
+
+describe('launch angle — read off the tracer line', () => {
+  // Flight points laid down at a known angle above horizontal, target to the
+  // left (smaller x), matching the stance in `body()`.
+  const withFlight = (deg) => {
+    const frames = arcSwing();
+    const impactIdx = frames.findIndex((f, i) => i >= 6);
+    const labelled = labelPhases(frames, 'right');
+    const impact = labelled.findIndex((f) => f.phase === 'impact');
+    const ball = { x: 374, y: 755 };
+    const rad = (deg * Math.PI) / 180;
+    for (let k = 1; k <= 3; k++) {
+      const f = labelled[impact + k];
+      if (!f) continue;
+      f.keypoints.ball = {
+        x: ball.x - Math.cos(rad) * 70 * k,
+        y: ball.y - Math.sin(rad) * 70 * k,
+        z: 0, score: 0.8, flight: true,
+      };
+    }
+    labelled[impact].keypoints.ball = { ...ball, score: 0.9, estimated: false };
+    return clubMetrics(analyzeFrames(labelled, IDEAL), IDEAL);
+  };
+
+  it('measures a driver-like launch', () => {
+    const m = withFlight(12);
+    expect(m.launchAngle).toBeCloseTo(12, 0);
+    expect(m.tracerQuality).toBe('ok');
+  });
+
+  it('measures a wedge-like launch', () => {
+    expect(withFlight(30).launchAngle).toBeCloseTo(30, 0);
+  });
+
+  it('reports no launch angle when there was no tracer', () => {
+    const m = clubMetrics(analyzeFrames(labelPhases(arcSwing(), 'right'), IDEAL), IDEAL);
+    expect(m.launchAngle).toBeNull();
+    expect(m.tracerQuality).toBe('none');
+    expect(m.flightPoints).toBe(0);
+  });
+
+  it('shows launch in the checkpoints against the club’s target', () => {
+    const targets = clubTargets(IDEAL.profile); // driver: 10–16°
+    const ok = clubCheckpointRows({ launchAngle: 12 }, targets);
+    const low = clubCheckpointRows({ launchAngle: 4 }, targets);
+    expect(ok.find((r) => r.label === 'Launch angle').ok).toBe(true);
+    expect(low.find((r) => r.label === 'Launch angle').ok).toBe(false);
+  });
+
+  it('asks a wedge to launch higher than a driver', () => {
+    expect(clubTargets({ club: 'wedge' }).launchAngle[0])
+      .toBeGreaterThan(clubTargets({ club: 'driver' }).launchAngle[1]);
+  });
+
+  it('never turns launch angle into a fault — it must not move the score', () => {
+    const targets = clubTargets(IDEAL.profile);
+    const faults = clubFaults(
+      { tempoRatio: 3, launchAngle: 1 }, targets, IDEAL.profile
+    );
+    expect(faults).toHaveLength(0);
+  });
+});
 
 describe('placeBall — the ball stays put until the club gets there', () => {
   const labelled = () => labelPhases(arcSwing(), 'right');

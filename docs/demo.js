@@ -59,6 +59,25 @@ function clubheadAt(i) {
   };
 }
 
+// The ball leaves toward the target (smaller x here) and climbing, at the
+// ~12° a driver should launch at. Spaced as a slow-mo clip would catch it —
+// at normal speed the ball would be out of frame before the next frame, which
+// is exactly the limitation the sample is there to illustrate.
+const BALL_START = { x: 374, y: 755 };
+const LAUNCH = { dx: -78, dy: -16.6 }; // ≈12° above horizontal, per frame
+
+function ballInFlightAt(i) {
+  const step = i - 6; // frame 6 is impact
+  if (step < 1 || step > 3) return null;
+  return {
+    x: BALL_START.x + LAUNCH.dx * step,
+    y: BALL_START.y + LAUNCH.dy * step,
+    z: 0,
+    score: 0.8,
+    flight: true,
+  };
+}
+
 export function buildDemoSwing() {
   return SEQUENCE.map(({ t, ...params }, i) => {
     const keypoints = demoPose(params);
@@ -66,9 +85,11 @@ export function buildDemoSwing() {
     if (club) keypoints.clubhead = club;
     if (i === 0) {
       // At address the club is on the ball, so both points come from the ball.
-      keypoints.ball = { x: 374, y: 755, z: 0, score: 0.9, estimated: false };
-      keypoints.clubhead = { x: 374, y: 755, z: 0, score: 0.6 };
+      keypoints.ball = { ...BALL_START, z: 0, score: 0.9, estimated: false };
+      keypoints.clubhead = { ...BALL_START, z: 0, score: 0.6 };
     }
+    const inFlight = ballInFlightAt(i);
+    if (inFlight) keypoints.ball = inFlight;
     return { timeMs: t, width: 800, height: 900, keypoints };
   });
 }

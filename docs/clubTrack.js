@@ -377,6 +377,159 @@ export function trackClubhead(frames, ideal, ball) {
   return { pxPerCm, radiusPx: radius, tracked };
 }
 
+// ---------------------------------------------------------------------------
+// Ball flight (the tracer)
+// ---------------------------------------------------------------------------
+
+// How many frames after impact to keep looking. Past this the ball is either
+// gone from frame or too small to separate from noise.
+const MAX_FLIGHT_FRAMES = 12;
+
+// Frame-to-frame travel is what decides whether a tracer is possible at all.
+// A driver leaves at ~150mph; in a frame that frames a golfer, that is about
+// one whole frame width per 1/30s — the ball is simply gone on the next
+// sample. At 120/240fps it moves a quarter or an eighth of that and there is
+// a real flight to follow, which is why this is a slow-mo feature and says so
+// rather than drawing a confident arc through one point.
+const MIN_TRACER_POINTS = 2;
+
+// Follow the ball off the face. Returns the points it found; they are also
+// written onto the frames as `ball` keypoints flagged `flight`, so the overlay
+// and the metrics read them the same way they read everything else.
+export function trackBallFlight(frames, ideal, ballAt, impactIdx) {
+  const out = { points: [], lost: null, quality: 'none' };
+  if (!ballAt || impactIdx == null || impactIdx < 0) return out;
+
+  const shot = [];
+  frames.forEach((f, i) => { if (f.grey) shot.push(i); });
+  const start = shot.indexOf(impactIdx);
+  if (start < 0 || shot.length - start < 3) return out;
+
+  const g0 = frames[shot[0]].grey;
+  const scale = g0.w / frames[shot[0]].width;
+  const pxPerCm = estimatePxPerCm(frames, ideal.profile);
+  const dir = targetDirection(frames[impactIdx].keypoints, ideal.profile.handedness);
+
+  // Body and club are the two other fast-moving things in the picture. The
+  // ball has to be separated from both or the tracer just follows the club.
+  const maskNames = Object.keys(LANDMARK_MASK_RADIUS);
+  const bodyPx = pxPerCm ? (ideal.profile.heightCm || 178) * NOSE_TO_ANKLE * pxPerCm : 400;
+
+  let prev = { x: ballAt.x, y: ballAt.y };
+  let vel = null;
+
+  for (let j = start + 1; j < shot.length && j - start <= MAX_FLIGHT_FRAMES; j++) {
+    const f = frames[shot[j]];
+    const kp = f.keypoints;
+    const masks = maskNames.map((n) => {
+      const p = P(kp, n);
+      if (!p) return null;
+      const r = LANDMARK_MASK_RADIUS[n] * bodyPx * scale;
+      return { x: p.x * scale, y: p.y * scale, r2: r * r };
+    }).filter(Boolean);
+    if (kp.clubhead) {
+      const r = 0.12 * bodyPx * scale;
+      masks.push({ x: kp.clubhead.x * scale, y: kp.clubhead.y * scale, r2: r * r });
+    }
+
+    // Where to look. With a velocity in hand the ball is very nearly where
+    // constant motion says; without one, the whole frame ahead of the ball is
+    // fair game, narrowed by the direction it must have left in.
+    const predicted = vel ? { x: prev.x + vel.x, y: prev.y + vel.y } : prev;
+    const reach = vel ? Math.max(0.5 * Math.hypot(vel.x, vel.y), 0.08 * bodyPx) : 1.2 * bodyPx;
+
+    const hit = scanBall(
+      f.grey, frames[shot[j - 1]].grey,
+      j + 1 < shot.length ? frames[shot[j + 1]].grey : null,
+      { predicted, reach, from: prev, dir, freeSearch: !vel, masks, scale }
+    );
+    if (!hit) { out.lost = j - start; break; }
+
+    f.keypoints.ball = { x: hit.x, y: hit.y, z: 0, score: 0.8, flight: true };
+    out.points.push({ x: hit.x, y: hit.y, timeMs: f.timeMs });
+    vel = { x: hit.x - prev.x, y: hit.y - prev.y };
+    prev = { x: hit.x, y: hit.y };
+  }
+
+  out.quality = out.points.length >= MIN_TRACER_POINTS ? 'ok'
+    : out.points.length ? 'weak' : 'none';
+  return out;
+}
+
+// Landmarks to mask out during flight tracking, and how wide, as a fraction of
+// the player's pixel height. Wider around the torso and arms, which are still
+// swinging hard just after impact.
+const LANDMARK_MASK_RADIUS = {
+  nose: 0.10, left_shoulder: 0.12, right_shoulder: 0.12,
+  left_elbow: 0.10, right_elbow: 0.10, left_wrist: 0.10, right_wrist: 0.10,
+  left_hip: 0.12, right_hip: 0.12, left_knee: 0.10, right_knee: 0.10,
+};
+
+function scanBall(grey, prev, next, opts) {
+  const { data, w, h } = grey;
+  const pd = prev.data;
+  const nd = next ? next.data : null;
+  const { predicted, reach, from, dir, freeSearch, masks, scale } = opts;
+
+  const px = predicted.x * scale, py = predicted.y * scale;
+  const fx = from.x * scale, fy = from.y * scale;
+  const rad = reach * scale;
+  const invR2 = 1 / (2 * rad * rad);
+
+  let bestW = 0, bestX = 0, bestY = 0, total = 0;
+  const weights = new Float32Array(w * h);
+  const x0 = Math.max(1, Math.floor(px - rad)), x1 = Math.min(w - 2, Math.ceil(px + rad));
+  const y0 = Math.max(1, Math.floor(py - rad)), y1 = Math.min(h - 2, Math.ceil(py + rad));
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = y * w + x;
+      const motion = nd
+        ? Math.min(Math.abs(data[i] - pd[i]), Math.abs(data[i] - nd[i]))
+        : Math.abs(data[i] - pd[i]);
+      if (motion < MOTION_FLOOR) continue;
+
+      let masked = false;
+      for (const m of masks) {
+        if ((x - m.x) * (x - m.x) + (y - m.y) * (y - m.y) < m.r2) { masked = true; break; }
+      }
+      if (masked) continue;
+
+      // On the first step there is no velocity yet, so the only thing keeping
+      // this honest is where a struck ball is allowed to go: off toward the
+      // target, and not downward into the ground.
+      if (freeSearch) {
+        const dx = x - fx, dy = y - fy;
+        const len = Math.hypot(dx, dy);
+        if (len < 2) continue;
+        if ((dx * dir) / len < -0.2) continue;   // must be broadly toward the target
+        if (dy / len > 0.3) continue;            // and not diving into the turf
+      }
+
+      const dpx = x - px, dpy = y - py;
+      const wgt = motion * Math.exp(-(dpx * dpx + dpy * dpy) * invR2);
+      weights[i] = wgt;
+      total += wgt;
+      if (wgt > bestW) { bestW = wgt; bestX = x; bestY = y; }
+    }
+  }
+  if (!bestW || !total) return null;
+
+  // A ball is a small compact blob; the window stays tight so a big smear of
+  // background motion cannot pass for one.
+  const win = 3;
+  let sw = 0, sx = 0, sy = 0;
+  for (let y = Math.max(0, bestY - win); y <= Math.min(h - 1, bestY + win); y++) {
+    for (let x = Math.max(0, bestX - win); x <= Math.min(w - 1, bestX + win); x++) {
+      const wg = weights[y * w + x];
+      if (!wg) continue;
+      sw += wg; sx += wg * x; sy += wg * y;
+    }
+  }
+  if (!sw || sw / total < 0.10) return null;
+  return { x: (sx / sw) / scale, y: (sy / sw) / scale };
+}
+
 // The ball is only ever located once, at address — but it sits there until the
 // club arrives, so every frame up to impact should carry it. Without this the
 // marker blinks out during playback and the low-point fault has nothing to
@@ -468,6 +621,7 @@ export function clubMetrics(frames, ideal, track = {}) {
     tempoRatio: null, backswingMs: null, downswingMs: null,
     speedMph: null, attackAngle: null, lowPointCm: null, lagAngle: null,
     ball: null, ballDetected: false, slowMo: false, arc: null,
+    launchAngle: null, flightPoints: 0, tracerQuality: 'none',
     tracked: track.tracked || 0, quality: 'none',
   };
 
@@ -569,6 +723,29 @@ export function clubMetrics(frames, ideal, track = {}) {
     }
   }
 
+  // ---- launch: the direction the ball actually left in
+  const flight = frames
+    .filter((f) => f.keypoints.ball && f.keypoints.ball.flight)
+    .map((f) => ({ x: f.keypoints.ball.x, y: f.keypoints.ball.y, timeMs: f.timeMs }));
+  out.flightPoints = flight.length;
+  out.tracerQuality = flight.length >= MIN_TRACER_POINTS ? 'ok' : flight.length ? 'weak' : 'none';
+
+  const struckFrom = impact?.keypoints?.ball && !impact.keypoints.ball.flight
+    ? impact.keypoints.ball
+    : out.ball;
+  if (struckFrom && flight.length >= MIN_TRACER_POINTS) {
+    // Straight line from the ball to the last point still close to impact.
+    // Over the few milliseconds a tracer covers, gravity has not bent the
+    // flight enough to matter, and a line averages out the per-point jitter
+    // that fitting a curve to three points would amplify.
+    const end = flight[Math.min(flight.length, 3) - 1];
+    const dx = end.x - struckFrom.x;
+    const dy = end.y - struckFrom.y;
+    if (Math.hypot(dx, dy) > 1) {
+      out.launchAngle = Math.round((Math.atan2(-dy, Math.abs(dx)) * 180) / Math.PI * 10) / 10;
+    }
+  }
+
   const arcCount = arcPts.length;
   out.quality = plausible && arcCount >= 4 ? 'ok'
     : out.tracked > 0 ? 'weak'
@@ -594,6 +771,10 @@ export function clubTargets(profile, sensitivity = 'normal') {
     // How far past the ball the arc should bottom out, in cm. Meaningless off
     // a tee, so the driver opts out.
     lowPointMinCm: club === 'driver' ? null : 1,
+    // Where a well-struck shot should leave. Reported for information only —
+    // no fault hangs off it, because on anything but a slow-mo clip the tracer
+    // has too few points to carry a number that could cost somebody score.
+    launchAngle: club === 'driver' ? [10, 16] : club === 'wedge' ? [26, 36] : [14, 22],
   };
   if (sensitivity === 'relaxed') {
     base.attackAngle = [base.attackAngle[0] - 3, base.attackAngle[1] + 3];
@@ -732,6 +913,12 @@ export function clubCheckpointRows(metrics, targets, units = 'imperial') {
     rows.push({
       label: 'Wrist lag halfway down', measured: metrics.lagAngle,
       target: targets.lagMax, kind: 'max', unit: '°',
+    });
+  }
+  if (metrics.launchAngle != null) {
+    rows.push({
+      label: 'Launch angle', measured: metrics.launchAngle,
+      target: targets.launchAngle, kind: 'range', unit: '°',
     });
   }
   if (metrics.lowPointCm != null && targets.lowPointMinCm != null) {

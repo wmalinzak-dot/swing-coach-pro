@@ -16,11 +16,12 @@ import { detectSwing, detectLiveFrame } from './pose.js';
 import { drillFor } from './drills.js';
 import { buildDemoSwing } from './demo.js';
 import {
-  trackClubhead, findBall, placeBall, clubMetrics, clubTargets, applyClubFaults,
-  clubCheckpointRows,
+  trackClubhead, trackBallFlight, findBall, placeBall, clubMetrics, clubTargets,
+  applyClubFaults, clubCheckpointRows,
 } from './clubTrack.js';
 
 const FLAG = '#e4353b', AMBER = '#e8a33d', CHALK = '#f2efe6', GOOD = '#8fd6a5';
+const TRACER = '#ffd76a'; // shot tracer — reads against both sky and turf
 const KEY_PHASES = ['setup', 'top', 'impact'];
 const HISTORY_KEY = 'scp-history';
 const FRAME_STEP = 1 / 30;
@@ -37,6 +38,7 @@ const state = {
   club: null,        // clubhead/ball metrics for the current swing
   clubTrack: null,   // scale + hit count from the pixel tracker
   showClubPath: true,
+  showTracer: true,
   isSample: false,
   videoObjectUrl: null,
 };
@@ -240,6 +242,11 @@ $('toggle-club').addEventListener('click', () => {
   $('toggle-club').setAttribute('aria-pressed', String(state.showClubPath));
   drawCurrentFrame();
 });
+$('toggle-tracer').addEventListener('click', () => {
+  state.showTracer = !state.showTracer;
+  $('toggle-tracer').setAttribute('aria-pressed', String(state.showTracer));
+  drawCurrentFrame();
+});
 function stepFrame(dir) {
   if (!video.duration) return;
   video.pause();
@@ -316,6 +323,13 @@ async function trackClub(frames) {
     const ball = findBall(video, frames[0], state.ideal);
     if (ball) frames[0].keypoints.ball = ball;
     state.clubTrack = trackClubhead(frames, state.ideal, ball);
+    // The tracer needs to know which frame is impact, and phase labelling is a
+    // pure function of the pose track — so run it here rather than threading
+    // the index back out of scoreFrames later. It gets computed identically
+    // there; this is cheap and keeps the greyscale buffers in one place.
+    const impactIdx = labelPhases(frames, state.ideal.profile.handedness)
+      .findIndex((f) => f.phase === 'impact');
+    trackBallFlight(frames, state.ideal, ball, impactIdx);
   } catch {
     // Tracking is a bonus on top of the body analysis — never let it take the
     // whole result down with it.
@@ -375,8 +389,63 @@ function drawCurrentFrame() {
   if (!frame) return;
   const scale = rect.width / video.videoWidth;
   if (state.showClubPath) drawClubPath(ctx, frame, scale);
+  if (state.showTracer) drawTracer(ctx, frame, scale);
   drawSkeleton(ctx, frame, scale);
   renderActiveBanner(frame);
+}
+
+// The shot tracer: the ball's flight off the face, drawn as it happens.
+//
+// It stops where the tracking stopped, plus a short extrapolation that fades
+// out. Real broadcast tracers follow the ball to the ground; this one has a
+// handful of frames of a departing ball and no idea where it lands, so it
+// shows the line it actually measured and lets it dissolve rather than
+// inventing a landing spot.
+function drawTracer(g, frame, scale) {
+  if (!state.results) return;
+  const flight = state.results
+    .filter((f) => f.keypoints.ball && f.keypoints.ball.flight && f.timeMs <= frame.timeMs)
+    .map((f) => f.keypoints.ball);
+  if (!flight.length) return;
+
+  // Anchor the line on the ball where it was struck, not on the first frame
+  // the tracker managed to catch it.
+  const impact = state.results.find((f) => f.phase === 'impact');
+  const struck = impact?.keypoints?.ball;
+  const pts = struck && !struck.flight ? [struck, ...flight] : flight;
+  if (pts.length < 2) return;
+
+  const X = (v) => v * scale, Y = (v) => v * scale;
+  g.save();
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  g.shadowColor = 'rgba(0,0,0,0.55)';
+  g.shadowBlur = 6;
+  g.strokeStyle = TRACER;
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(X(pts[0].x), Y(pts[0].y));
+  for (let i = 1; i < pts.length; i++) g.lineTo(X(pts[i].x), Y(pts[i].y));
+  g.stroke();
+
+  // Carry the last measured direction on a little way, fading, so the eye
+  // reads "still going" instead of "stopped dead in mid-air".
+  const a = pts[pts.length - 2], b = pts[pts.length - 1];
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const steps = 5;
+  for (let i = 0; i < steps; i++) {
+    g.globalAlpha = 0.5 * (1 - i / steps);
+    g.beginPath();
+    g.moveTo(X(b.x + dx * i * 0.4), Y(b.y + dy * i * 0.4));
+    g.lineTo(X(b.x + dx * (i + 1) * 0.4), Y(b.y + dy * (i + 1) * 0.4));
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+
+  // The ball itself, at the head of the line.
+  g.fillStyle = TRACER;
+  g.beginPath(); g.arc(X(b.x), Y(b.y), 5, 0, Math.PI * 2); g.fill();
+  g.restore();
 }
 
 // The clubhead's route through the swing, drawn up to wherever playback is.
@@ -466,7 +535,8 @@ function drawSkeleton(g, frame, scale) {
 // top of the skeleton so the club reads as one object with the body.
 function drawClub(g, kp, X, Y) {
   const club = kp.clubhead;
-  const ball = kp.ball;
+  // A ball in flight belongs to the tracer, which draws its own head marker.
+  const ball = kp.ball && !kp.ball.flight ? kp.ball : null;
   if (ball) {
     g.strokeStyle = CHALK;
     g.lineWidth = 2;
@@ -624,6 +694,15 @@ function renderClubPanel() {
     notes.push(m.ballDetected
       ? 'Ball found in the picture, so the low point is measured against the real thing.'
       : 'No ball visible at address — the low point is measured against where your stance says it should be.');
+  }
+  // The tracer's limit is physics, not code: a struck ball crosses a frame
+  // this size in about 1/30s, so normal-speed video has nothing to follow.
+  if (m.tracerQuality === 'ok') {
+    notes.push(`Ball tracer: followed the ball for ${m.flightPoints} frames off the face. Launch angle is measured from that line.`);
+  } else if (!state.isSample) {
+    notes.push(m.tracerQuality === 'weak'
+      ? 'The ball was only caught in one frame after impact, which is not enough for a tracer. A slow-mo clip (120/240fps) gives it several.'
+      : 'No ball tracer: at normal speed a struck ball crosses the whole frame between one frame and the next. Film in slow-mo (120/240fps) and it can follow the flight.');
   }
   if (state.isSample) notes.push('Sample swing: the stick figure is schematic, so speed is not computed for it.');
 
