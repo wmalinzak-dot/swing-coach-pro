@@ -109,6 +109,69 @@ export const DRILLS = {
       'Exaggerate it — finish on the tip of your trail toe for 10 reps.',
     ],
   },
+  casting: {
+    name: 'Pump-to-parallel',
+    steps: [
+      'Go to the top, then pump down to where the shaft is parallel to the ground and stop. Look: the shaft should point at the ball line, not at the sky.',
+      'Pump three times feeling the wrists stay hinged, then hit the ball on the fourth.',
+      'The release is not something you do — it is what happens when you stop doing anything.',
+      '20 pumps, then 10 balls at half speed keeping the same feel.',
+    ],
+  },
+  scooping: {
+    name: 'Divot-after-the-line',
+    steps: [
+      'Draw a line on the turf (or lay a tee peg) and set the ball just behind it.',
+      'Hit shots taking your divot on the target side of the line, every time.',
+      'Feel your hands lead the clubhead past the ball — the loft launches it, you do not.',
+      '15 balls; check the turf after each one and only count the ones that bruise past the line.',
+    ],
+  },
+  'too-steep': {
+    name: 'Headcover outside the ball',
+    steps: [
+      'Put a headcover a few inches outside the ball and just behind it.',
+      'Swing so the club misses the headcover on the way down — that forces a shallower, more inside path.',
+      'Feel your trail elbow drop in front of your hip as you start down instead of the arms throwing out.',
+      '10 rehearsals, then 10 balls.',
+    ],
+  },
+  'driver-hitting-down': {
+    name: 'Tee-it-high sweep',
+    steps: [
+      'Tee the ball so half of it sits above the crown of the driver.',
+      'Play it off the inside of your lead heel and set 60% of your weight on the trail foot at address.',
+      'Make swings that clip the top of the tee without breaking it — you are catching the ball on the way up.',
+      '15 balls, keeping the tee in one piece.',
+    ],
+  },
+  'rushed-transition': {
+    name: 'Three-to-one count',
+    steps: [
+      'Count "one-two-three" going back and "one" coming down — that is the ratio nearly every tour swing shares.',
+      'Say it out loud for the first ten swings; the club should feel like it arrives at the top before you start down.',
+      'Start the downswing from the ground — lead heel pressure first, arms last.',
+      'Hit 10 balls to the count, then 5 without counting, keeping the same rhythm.',
+    ],
+  },
+  'lazy-transition': {
+    name: 'Accelerate-to-the-finish',
+    steps: [
+      'Make swings where the loudest whoosh happens past the ball, not before it.',
+      'Hold a club upside down (grip the head) and swing — the whoosh tells you where the speed actually is.',
+      'Same backswing length, more commitment down. Slow is not the same as smooth.',
+      '10 upside-down swings, then 10 balls chasing the same sound.',
+    ],
+  },
+  'low-point-behind-ball': {
+    name: 'Towel-behind-the-ball',
+    steps: [
+      'Lay a folded towel about a hand-width behind the ball.',
+      'Hit shots without touching the towel — impossible unless the low point moves in front of the ball.',
+      'The move that does it is pressure into the lead foot as you start down, not lifting up.',
+      '15 balls; if you keep hitting the towel, make half swings until you do not.',
+    ],
+  },
 };
 
 export function drillFor(faultId) {

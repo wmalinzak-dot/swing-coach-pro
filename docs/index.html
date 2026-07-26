@@ -15,6 +15,12 @@
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
+  /* The UA's [hidden] rule is display:none at the lowest precedence, so any
+     author `display` beats it. Several elements here are flex containers that
+     get toggled via the hidden property (the playback bar, the live fault
+     banner, the ft-in row), and each stayed on screen while claiming to be
+     hidden — metric mode showed the imperial inputs *and* the cm one. */
+  [hidden] { display: none !important; }
   body {
     margin: 0; font-family: var(--font); color: var(--chalk); line-height: 1.5;
     background: radial-gradient(120% 80% at 50% -10%, #0c3120 0%, var(--deep) 55%, var(--deep-2) 100%);
@@ -185,7 +191,7 @@
   </div>
 
   <h1 class="brand">SWING COACH&nbsp;PRO</h1>
-  <p class="tagline">Upload a swing. It finds where your body is off — at setup, the top, and impact — marks it on the video, scores the swing, and builds your practice plan.</p>
+  <p class="tagline">Upload a swing. It finds where your body is off — at setup, the top, and impact — follows the clubhead for your tempo, attack angle and low point, marks it all on the video, scores the swing, and builds your practice plan.</p>
 
   <div class="panel">
     <div class="section">Your body</div>
@@ -277,6 +283,7 @@
       <div class="pb-step" role="group" aria-label="Frame stepping">
         <button id="step-back" aria-label="Step one frame back">⟨ frame</button>
         <button id="step-fwd" aria-label="Step one frame forward">frame ⟩</button>
+        <button id="toggle-club" aria-pressed="true" aria-label="Show the club path">club path</button>
       </div>
       <div class="pb-phases" id="pb-phases"></div>
     </div>

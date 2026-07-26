@@ -9,13 +9,14 @@
 // from CDNs, so offline mode covers the UI and the sample analysis, not
 // video pose detection.
 
-const CACHE = 'scp-v2';
+const CACHE = 'scp-v3';
 const SHELL = [
   './',
   './index.html',
   './app.js',
   './engine.js',
   './pose.js',
+  './clubTrack.js',
   './drills.js',
   './demo.js',
   './manifest.webmanifest',
